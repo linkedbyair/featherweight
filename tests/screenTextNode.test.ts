@@ -8,6 +8,11 @@ Object.assign(globalThis, { figma: { mixed: Symbol('mixed') } })
 type Segment = {
   openTypeFeatures?: Record<string, boolean>
   listOptions?: { type: 'ORDERED' | 'UNORDERED' | 'NONE' }
+  textDecoration?: 'NONE' | 'UNDERLINE' | 'STRIKETHROUGH'
+  textDecorationStyle?: 'SOLID' | 'WAVY' | 'DOTTED' | null
+  textDecorationOffset?: { unit: 'AUTO' } | { unit: 'PIXELS' | 'PERCENT'; value: number } | null
+  textDecorationThickness?: { unit: 'AUTO' } | { unit: 'PIXELS' | 'PERCENT'; value: number } | null
+  textDecorationColor?: { value: 'AUTO' } | { value: { type: 'SOLID' } } | null
 }
 
 type Box = { x: number; y: number; width: number; height: number }
@@ -169,5 +174,61 @@ describe('screenTextNode — 합성 상태', () => {
 
   it('페이지까지 올라가면 멈춘다', () => {
     expect(code(fakeText(plain, { parent: frame() }))).toBeNull()
+  })
+})
+
+describe('screenTextNode — 밑줄·취소선', () => {
+  const rejected = { ok: false, reason: { code: 'reject.decorated' } }
+
+  it('기본 모양(실선·자동 위치·두께·색)의 밑줄·취소선은 다시 긋는다', () => {
+    const auto = {
+      textDecorationStyle: 'SOLID',
+      textDecorationOffset: { unit: 'AUTO' },
+      textDecorationThickness: { unit: 'AUTO' },
+      textDecorationColor: { value: 'AUTO' }
+    } as const
+    expect(screenTextNode(fakeText([{ textDecoration: 'UNDERLINE', ...auto }]))).toEqual({
+      ok: true
+    })
+    expect(screenTextNode(fakeText([{ textDecoration: 'STRIKETHROUGH', ...auto }]))).toEqual({
+      ok: true
+    })
+  })
+
+  it('장식 속성이 없는 옛 API 응답은 기본값으로 본다', () => {
+    expect(screenTextNode(fakeText([{ textDecoration: 'UNDERLINE' }]))).toEqual({ ok: true })
+  })
+
+  it('물결·점선, 직접 정한 위치·두께·색은 아웃라인으로 남긴다', () => {
+    expect(
+      screenTextNode(fakeText([{ textDecoration: 'UNDERLINE', textDecorationStyle: 'WAVY' }]))
+    ).toEqual(rejected)
+    expect(
+      screenTextNode(
+        fakeText([
+          { textDecoration: 'UNDERLINE', textDecorationOffset: { unit: 'PIXELS', value: 2 } }
+        ])
+      )
+    ).toEqual(rejected)
+    expect(
+      screenTextNode(
+        fakeText([
+          { textDecoration: 'UNDERLINE', textDecorationThickness: { unit: 'PERCENT', value: 10 } }
+        ])
+      )
+    ).toEqual(rejected)
+    expect(
+      screenTextNode(
+        fakeText([
+          { textDecoration: 'STRIKETHROUGH', textDecorationColor: { value: { type: 'SOLID' } } }
+        ])
+      )
+    ).toEqual(rejected)
+  })
+
+  it('장식이 없는 세그먼트의 장식 속성은 보지 않는다', () => {
+    expect(
+      screenTextNode(fakeText([{ textDecoration: 'NONE', textDecorationStyle: 'WAVY' }]))
+    ).toEqual({ ok: true })
   })
 })

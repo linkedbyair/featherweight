@@ -3,6 +3,7 @@
 import { PdfPart, Reason, Settings, TextRunSource, TMP_MARK_KEY, TMP_NODE_NAME } from '../lib/types'
 import { withTimeout } from '../lib/withTimeout'
 import { ImageManySender, ImageRequestSender, OriginalSink, shrinkImages } from './images'
+import { collectLinkTargets } from './links'
 import { ExportableNode, isExportable } from './selection'
 import { isTemporary, markTemporary } from './temporary'
 import {
@@ -42,6 +43,11 @@ export type FrameContext = {
     rejected: Array<{ nodeId: string; reason: Reason }>
   }>
   isCancelled: () => boolean
+  /**
+   * 이번에 내보내는 프레임 id 들(쪽 순서). 주면 프레임 안의 레이어 간 링크 대상을 풀어
+   * part.linkTargets 로 보낸다 — UI 가 figma.com 링크를 PDF 안의 쪽 이동으로 바꾼다 (main/links)
+   */
+  frameOrder?: readonly string[]
 }
 
 export async function exportFrame(
@@ -110,6 +116,11 @@ export async function exportFrame(
       node.name
     )
 
+    const linkTargets =
+      context.frameOrder !== undefined && context.frameOrder.length > 0
+        ? await collectLinkTargets(node, context.frameOrder)
+        : {}
+
     return {
       ok: true,
       part: {
@@ -117,6 +128,7 @@ export async function exportFrame(
         name: node.name,
         bytes,
         text: text.sources,
+        ...(Object.keys(linkTargets).length > 0 ? { linkTargets } : {}),
         stats: {
           imagesProcessed: images.processed,
           imagesCropped: images.cropped,

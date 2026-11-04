@@ -8,11 +8,15 @@
 // 원문에는 묶음문자 같은 폭 0 서식 문자가 섞여 있을 수 있고 run 에서는 그것을 뺀다 —
 // 맞출 때 원문 쪽의 그 문자는 건너뛰고, run 기준 인덱스는 그것을 뺀 수로 센다.
 
+import { linkUrlOf } from './figmaLinks'
 import { isIgnorable } from './ignorable'
 import { TextSegment } from './types'
 
-/** run 안의 글자 범위(run 기준 인덱스)와 URL */
+/** run 안의 글자 범위(run 기준 인덱스)와 URL. NODE 링크는 figmaLinks 의 자리표시 URL 이다 */
 export type LinkSpan = { start: number; end: number; url: string }
+
+/** 밑줄·취소선이 걸린 run 안의 글자 범위(run 기준 인덱스) */
+export type DecorationSpan = { start: number; end: number; kind: 'UNDERLINE' | 'STRIKETHROUGH' }
 
 /** 원문에서 run 의 글자가 시작·끝나는 자리(원문 인덱스). 원문의 무시 문자는 건너뛴다. */
 export function locateRun(
@@ -45,9 +49,23 @@ export function linkSpansForRun(
   runText: string,
   segments: readonly TextSegment[]
 ): { spans: LinkSpan[]; next: number } {
-  if (runText === '') return { spans: [], next: cursor }
+  const { links, next } = spansForRun(characters, cursor, runText, segments)
+  return { spans: links, next }
+}
+
+/**
+ * run 하나가 원문의 어디인지 한 번 찾고, 그 구간에 걸린 링크와 밑줄·취소선을 함께 돌려준다.
+ * 둘을 따로 찾으면 커서가 두 번 움직여 둘째부터 어긋난다.
+ */
+export function spansForRun(
+  characters: string,
+  cursor: number,
+  runText: string,
+  segments: readonly TextSegment[]
+): { links: LinkSpan[]; decorations: DecorationSpan[]; next: number } {
+  if (runText === '') return { links: [], decorations: [], next: cursor }
   const located = locateRun(characters, cursor, runText)
-  if (located === null) return { spans: [], next: cursor }
+  if (located === null) return { links: [], decorations: [], next: cursor }
   const { start: at, end: runEnd } = located
 
   // 원문 인덱스 → run 기준 인덱스: 그 사이의 무시 문자는 run 에 없다
@@ -57,17 +75,27 @@ export function linkSpansForRun(
     return count
   }
 
-  const spans: LinkSpan[] = []
+  const links: LinkSpan[] = []
+  const decorations: DecorationSpan[] = []
   for (const segment of segments) {
-    const url = segment.hyperlink?.type === 'URL' ? segment.hyperlink.value : ''
-    if (url === '') continue
     const start = toRun(Math.max(segment.start, at))
     const end = toRun(Math.min(segment.end, runEnd))
     if (end <= start) continue
-    const last = spans[spans.length - 1]
-    // 같은 URL 이 이어지면 한 구간으로 — 세그먼트가 굵기 때문에 갈라져 있을 수 있다
-    if (last !== undefined && last.url === url && last.end === start) last.end = end
-    else spans.push({ start, end, url })
+
+    const url = linkUrlOf(segment.hyperlink)
+    if (url !== '') {
+      const last = links[links.length - 1]
+      // 같은 URL 이 이어지면 한 구간으로 — 세그먼트가 굵기 때문에 갈라져 있을 수 있다
+      if (last !== undefined && last.url === url && last.end === start) last.end = end
+      else links.push({ start, end, url })
+    }
+
+    const kind = segment.textDecoration
+    if (kind === 'UNDERLINE' || kind === 'STRIKETHROUGH') {
+      const last = decorations[decorations.length - 1]
+      if (last !== undefined && last.kind === kind && last.end === start) last.end = end
+      else decorations.push({ start, end, kind })
+    }
   }
-  return { spans, next: runEnd }
+  return { links, decorations, next: runEnd }
 }

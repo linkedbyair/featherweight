@@ -181,6 +181,7 @@ export function useExport(
         title: fileName.replace(/\.pdf$/i, ''),
         createdAt: new Date(),
         ownImageSizes: ownImageSizes(),
+        ...(wantsLinks.current ? { linkTargets: linkTargetsOf(collected) } : {}),
         drawText: wantsText.current
           ? async (document, page, index) => {
               const part = collected.find((candidate) => candidate.index === index)
@@ -549,4 +550,13 @@ function logFit(fit: FitReport | null, actualBytes: number): FitReport | null {
     fit.calibration
   )
   return fit
+}
+
+/** 프레임마다 푼 링크 대상을 하나로 — 같은 노드는 어느 프레임이 풀어도 같은 프레임을 가리킨다 */
+function linkTargetsOf(parts: readonly PdfPart[]): Map<string, number> {
+  const targets = new Map<string, number>()
+  for (const part of parts) {
+    for (const [id, index] of Object.entries(part.linkTargets ?? {})) targets.set(id, index)
+  }
+  return targets
 }

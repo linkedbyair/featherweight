@@ -38,6 +38,12 @@ Korean line-break joiners no longer force outlines either.
 Keep hyperlinks). **OTF fonts** can be added now, not just TTF. The font
 folder picker explains itself.
 
+**Links between frames** — prototype connections (On click → Navigate to) and
+text links to other layers used to point at figma.com in the PDF. When the
+target is a frame in the same export, they now jump to that page inside the PDF
+instead (Advanced → Keep hyperlinks). Links to layers outside the export are
+left as they were.
+
 **New in 3.2** — pictures that are only partly visible are stored as just the
 visible area, when that makes the file smaller without losing sharpness anywhere
 (Options → "Trim pictures to the visible area", on by default). Image size is now
@@ -149,8 +155,10 @@ and why, and clicking a reason selects them on canvas:
 
 - Rotated or flipped text, text on a path
 - Text with gradient/image fills, strokes, or effects (shadow, blur)
-- Underlined or struck-through text (redrawing those isn't implemented yet —
-  better an outline than a silently dropped underline)
+- Underlined or struck-through text with a non-default look — wavy or dotted
+  lines, or a custom offset, thickness or color. Plain underlines and
+  strikethroughs are redrawn from the font's own underline/strikeout metrics
+  (Figma's "skip ink" gaps under descenders aren't reproduced)
 - Text used as a mask or inside a masked group, text with a blend mode, text
   inside a translucent layer, under a layer blur or an unfilled shadow, or
   running outside a clipping frame — redrawn text can't take part in that

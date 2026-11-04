@@ -2,7 +2,11 @@
 
 import {
   beginText,
+  closePath,
   endText,
+  fill,
+  lineTo,
+  moveTo,
   PDFArray,
   PDFDocument,
   PDFFont,
@@ -31,7 +35,7 @@ import { isIgnorable } from '../lib/ignorable'
 import { kernAdjustments } from '../lib/kerning'
 import { needsShaping } from '../lib/shaping'
 import { hasRtlListParagraph, MarkerPlan, planMarkers } from '../lib/listMarker'
-import { LinkSpan, linkSpansForRun, locateRun } from '../lib/textLinks'
+import { DecorationSpan, LinkSpan, locateRun, spansForRun } from '../lib/textLinks'
 import { inkOffsets } from '../lib/textMetrics'
 import { FontRef, Reason, StoredFont, TextRunSource } from '../lib/types'
 import { createProbe, factsOf, FontProbe, pdfLibFontkit } from './fontkitAdapter'
@@ -254,13 +258,28 @@ export async function drawTextLayer(
     let cursor = 0
     for (const { run, chunks } of planned) {
       const positions = drawRun(page, run, source.offset, pageHeight, chunks)
-      if (!options.links) continue
-      // 마커는 원문에 없는 글자다 — 링크를 찾겠다고 원문에서 뒤지면 `1.` 같은 것이 엉뚱한
-      // 자리에 맞아 커서가 앞질러 가고, 그다음 줄들의 링크가 통째로 밀린다
+      // 마커는 원문에 없는 글자다 — 링크·밑줄을 찾겠다고 원문에서 뒤지면 `1.` 같은 것이 엉뚱한
+      // 자리에 맞아 커서가 앞질러 가고, 그다음 줄들이 통째로 밀린다
       if (markerAnchorOf(run) !== undefined) continue
-      const { spans, next } = linkSpansForRun(source.characters, cursor, run.text, source.segments)
+      const { links, decorations, next } = spansForRun(
+        source.characters,
+        cursor,
+        run.text,
+        source.segments
+      )
       cursor = next
-      for (const span of spans) addLink(page, run, source.offset, pageHeight, positions, span)
+      if (decorations.length > 0)
+        drawDecorations(
+          page,
+          run,
+          source.offset,
+          pageHeight,
+          positions,
+          decorations,
+          chunks[0].probe
+        )
+      if (!options.links) continue
+      for (const span of links) addLink(page, run, source.offset, pageHeight, positions, span)
     }
     result.drawn += 1
   }
@@ -295,6 +314,88 @@ function addLink(
     A: { Type: 'Action', S: 'URI', URI: PDFString.of(span.url) }
   })
   page.node.addAnnot(context.register(annot))
+}
+
+/**
+ * 밑줄·취소선을 긋는다. Figma 는 글자와 함께 지웠으니(main/text) 같은 자리에 다시 그어야 한다.
+ *
+ * 위치·두께는 폰트가 정한 값 — 밑줄은 post 표의 underlinePosition(선의 윗변)·underlineThickness,
+ * 취소선은 OS/2 의 yStrikeoutPosition(윗변)·yStrikeoutSize. Figma 의 "자동" 위치·두께가 이것이다.
+ * 값이 없는 폰트는 흔한 비율로 대신한다. 가로 범위는 drawRun 이 돌려준 글자 위치에서 잰다.
+ * 색·불투명도는 그 글자의 것 — 세그먼트별로 색이 다르면 run 이 이미 갈라져 있다.
+ */
+function drawDecorations(
+  page: PDFPage,
+  run: SvgRun,
+  offset: { x: number; y: number },
+  pageHeight: number,
+  positions: readonly number[],
+  spans: readonly DecorationSpan[],
+  probe: FontProbe
+): void {
+  const size = run.fontSize
+  const metrics = decorationMetrics(probe)
+  const baseline = pageHeight - snappedBaseline(offset, run)
+
+  const ops: PDFOperator[] = [pushGraphicsState()]
+  if (run.opacity < 1) {
+    const state = page.node.newExtGState(
+      'GS',
+      page.doc.context.obj({ Type: 'ExtGState', ca: run.opacity, CA: run.opacity })
+    )
+    ops.push(setGraphicsState(state))
+  }
+  ops.push(setFillingRgbColor(run.fill.r, run.fill.g, run.fill.b))
+
+  let drawn = 0
+  for (const span of spans) {
+    const x0 = positions[span.start] ?? positions[0]
+    const x1 = positions[span.end] ?? positions[positions.length - 1]
+    if (x0 === undefined || x1 === undefined || x1 <= x0) continue
+    const line = span.kind === 'UNDERLINE' ? metrics.underline : metrics.strikeout
+    const top = baseline + line.top * size
+    const bottom = top - line.thickness * size
+    ops.push(
+      moveTo(x0, bottom),
+      lineTo(x1, bottom),
+      lineTo(x1, top),
+      lineTo(x0, top),
+      closePath(),
+      fill()
+    )
+    drawn += 1
+  }
+  ops.push(popGraphicsState())
+  if (drawn > 0) page.pushOperators(...ops)
+}
+
+/** em 단위(글자 크기에 곱한다). top 은 기준선에서 선의 윗변까지, 위가 + */
+type DecorationLine = { top: number; thickness: number }
+
+export function decorationMetrics(probe: FontProbe): {
+  underline: DecorationLine
+  strikeout: DecorationLine
+} {
+  const em = probe.unitsPerEm > 0 ? probe.unitsPerEm : 1000
+  const fallbackThickness = 0.05
+  const underlineThickness =
+    probe.underlineThickness > 0 ? probe.underlineThickness / em : fallbackThickness
+  const underlineTop = probe.underlinePosition !== 0 ? probe.underlinePosition / em : -0.1
+  const os2 = (
+    probe as unknown as { 'OS/2'?: { yStrikeoutPosition?: number; yStrikeoutSize?: number } }
+  )['OS/2']
+  const strikeThickness =
+    os2?.yStrikeoutSize !== undefined && os2.yStrikeoutSize > 0
+      ? os2.yStrikeoutSize / em
+      : underlineThickness
+  const strikeTop =
+    os2?.yStrikeoutPosition !== undefined && os2.yStrikeoutPosition > 0
+      ? os2.yStrikeoutPosition / em
+      : 0.3
+  return {
+    underline: { top: underlineTop, thickness: underlineThickness },
+    strikeout: { top: strikeTop, thickness: strikeThickness }
+  }
 }
 
 /** 대체 후보 순서대로 — 빠진 글자를 전부 덮는 첫 폰트 */

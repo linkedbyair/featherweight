@@ -137,7 +137,11 @@ export type TextSegment = {
   letterSpacing: { unit: 'PIXELS' | 'PERCENT'; value: number }
   textDecoration: string
   textCase: string
-  hyperlink: { type: 'URL'; value: string } | null
+  /**
+   * URL 은 그대로 링크 주석이 되고, NODE(Figma 안의 다른 레이어로 가는 링크)는 내보낸 PDF 안의
+   * 쪽으로 이어진다 — 대상이 이번 내보내기에 없으면 링크를 안 단다 (lib/figmaLinks)
+   */
+  hyperlink: { type: 'URL' | 'NODE'; value: string } | null
   /**
    * OpenType 기능 태그(소문자) → 켬/끔. ss18 같은 스타일 세트는 글리프가 바뀌고, kern/liga 는
    * Figma 가 기본으로 켜 두는데 사용자가 끌 수 있다 — 끈 것도 따라야 같은 모양이 나온다
@@ -402,6 +406,12 @@ export type PdfPart = {
   bytes: Uint8Array
   text: TextRunSource[]
   stats: PartStats
+  /**
+   * 이 프레임 안의 레이어 간 링크(프로토타입 Navigate, 텍스트의 NODE 링크)가 가리키는 노드 →
+   * 그 노드를 품은, 이번에 내보내는 프레임의 index. 머지 뒤 figma.com 링크를 PDF 안의 쪽 이동으로
+   * 바꾸는 데 쓴다 (ui/pdfLinks). 대상이 내보내기 밖이면 키가 없다.
+   */
+  linkTargets?: Record<string, number>
 }
 
 export interface PdfPartHandler extends EventHandler {

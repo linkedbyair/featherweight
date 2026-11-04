@@ -56,12 +56,11 @@ export function screenTextNode(
     return { ok: false, reason: { code: 'reject.effects' } }
   }
 
-  // 밑줄·취소선은 fill 과 함께 지워지는데 다시 그리는 코드가 아직 없다.
-  // 조용히 사라지게 두느니 아웃라인으로 남긴다 — 모양은 원본 그대로다.
-  const decoration = node.textDecoration
-  if (decoration === figma.mixed || decoration !== 'NONE') {
-    return { ok: false, reason: { code: 'reject.decorated' } }
-  }
+  // 밑줄·취소선은 글자와 함께 지워지고, UI 가 폰트의 밑줄·취소선 메트릭으로 다시 긋는다
+  // (textLayer.drawDecorations). 기본 모양(실선, 위치·두께·색 자동)만 — 물결·점선이나 직접 정한
+  // 위치·두께·색은 아직 못 따라 그리니 원래 모양(아웃라인)으로 둔다.
+  const decoration = screenDecoration(node)
+  if (decoration !== null) return { ok: false, reason: decoration }
 
   // 합성 상태 — 다시 그린 글자는 마스크·블렌드·조상의 불투명도·효과·클리핑을 받지 않는다.
   // 노드 자신의 불투명도는 SVG 에 실려 오므로 그대로 그린다(svgText 가 <g opacity> 까지 읽는다).
@@ -85,6 +84,36 @@ export function screenTextNode(
   }
 
   return { ok: true }
+}
+
+/**
+ * 밑줄·취소선을 우리가 다시 그어도 되는가. Figma 의 기본값(실선·자동 위치·자동 두께·글자색)이면
+ * 폰트의 post·OS/2 메트릭으로 같은 자리에 긋는다. 그 밖은 사유를 돌려준다.
+ *
+ * 잉크 건너뛰기(skip ink)는 따라 하지 않는다 — 밑줄이 디센더(g·p·y) 밑을 끊기지 않고 지나간다.
+ * 모양이 아주 조금 다를 뿐 글자는 그대로라 아웃라인으로 남기는 것보다 낫다고 본다.
+ */
+function screenDecoration(node: TextNode): Reason | null {
+  const segments = node.getStyledTextSegments([
+    'textDecoration',
+    'textDecorationStyle',
+    'textDecorationOffset',
+    'textDecorationThickness',
+    'textDecorationColor'
+  ])
+  // 이 속성들이 없는 옛 API 응답에서는 undefined 다 — 없으면 기본값(자동)으로 본다
+  for (const segment of segments) {
+    if ((segment.textDecoration ?? 'NONE') === 'NONE') continue
+    const style = segment.textDecorationStyle ?? 'SOLID'
+    if (style !== 'SOLID') return { code: 'reject.decorated' }
+    if ((segment.textDecorationOffset?.unit ?? 'AUTO') !== 'AUTO')
+      return { code: 'reject.decorated' }
+    if ((segment.textDecorationThickness?.unit ?? 'AUTO') !== 'AUTO')
+      return { code: 'reject.decorated' }
+    if ((segment.textDecorationColor?.value ?? 'AUTO') !== 'AUTO')
+      return { code: 'reject.decorated' }
+  }
+  return null
 }
 
 function isNormalBlend(mode: BlendMode): boolean {
@@ -198,9 +227,11 @@ export async function extractText(
         listType: segment.listOptions?.type ?? 'NONE',
         indentation: segment.indentation ?? 0,
         textCase: String(segment.textCase),
+        // NODE 링크는 Figma 안의 다른 레이어로 간다 — PDF 안의 쪽 이동으로 잇는다 (lib/figmaLinks)
         hyperlink:
-          segment.hyperlink !== null && segment.hyperlink.type === 'URL'
-            ? { type: 'URL', value: segment.hyperlink.value ?? '' }
+          segment.hyperlink !== null &&
+          (segment.hyperlink.type === 'URL' || segment.hyperlink.type === 'NODE')
+            ? { type: segment.hyperlink.type, value: segment.hyperlink.value ?? '' }
             : null,
         // Figma 는 'SS18' 처럼 대문자 — OpenType 태그는 소문자다. 실측: SUIT 의 "→" 는 ss18 을
         // 켜야 막대 있는 화살표고, 기본은 꺾쇠(〉)다. 기능을 잃으면 다른 글자가 나간다

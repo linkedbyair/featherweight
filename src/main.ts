@@ -353,6 +353,8 @@ async function runPass(
 
     const result = await exportFrame(order[index], index, {
       settings,
+      // 링크를 지키는 설정일 때만 레이어 간 링크를 PDF 안의 쪽 이동으로 잇는다
+      ...(settings.keepLinks ? { frameOrder: order } : {}),
       sendResizeRequest: (payload: ResizeRequestPayload) => {
         emit<ImageResizeHandler>('image:resize', payload)
       },

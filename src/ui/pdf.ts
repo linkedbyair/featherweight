@@ -14,6 +14,7 @@ import {
 } from 'pdf-lib'
 
 import { DrawResult, DrawSubstitution } from './textLayer'
+import { relinkToPages } from './pdfLinks'
 
 export type MergePart = { index: number; bytes: Uint8Array }
 
@@ -24,6 +25,11 @@ export type MergeMeta = {
   drawText?: (document: PDFDocument, page: PDFPage, partIndex: number) => Promise<DrawResult>
   /** 우리가 Figma 에 넣은 이미지의 치수("WxH") — PDF 안에서 우리 것과 Figma 가 스스로 래스터화한 것을 가른다 */
   ownImageSizes?: ReadonlySet<string>
+  /**
+   * 레이어 간 링크 대상(노드 id → 프레임 index). 주면 머지 뒤 figma.com 링크를 PDF 안의 쪽
+   * 이동으로 바꾼다 (ui/pdfLinks). 주지 않으면 링크를 건드리지 않는다.
+   */
+  linkTargets?: ReadonlyMap<string, number>
 }
 
 export type MergeOutput = PdfContents & {
@@ -32,6 +38,8 @@ export type MergeOutput = PdfContents & {
   textFallbacks: Array<{ nodeId: string; reason: Reason }>
   /** 대체 폰트로 그린 글자들 (노드별) */
   textSubstitutions: DrawSubstitution[]
+  /** figma.com 레이어 링크를 쪽 이동으로 바꾼 개수 (linkTargets 를 줬을 때) */
+  linksRelinked: number
 }
 
 /**
@@ -101,10 +109,12 @@ export async function mergePdfs(
   let textDrawn = 0
   const textFallbacks: Array<{ nodeId: string; reason: Reason }> = []
   const textSubstitutions: DrawSubstitution[] = []
+  const firstPageOfFrame = new Map<number, number>()
 
   for (const part of ordered) {
     const source = await PDFDocument.load(part.bytes)
     const pages = await out.copyPages(source, source.getPageIndices())
+    firstPageOfFrame.set(part.index, out.getPageCount())
     for (const [index, page] of pages.entries()) {
       out.addPage(page)
       if (meta.drawText === undefined) continue
@@ -118,6 +128,12 @@ export async function mergePdfs(
       textSubstitutions.push(...drawn.substitutions)
     }
   }
+
+  // 모든 쪽이 붙은 뒤에야 대상 쪽의 참조가 있다 — 그래서 머지 끝에서 한 번에 바꾼다
+  const linksRelinked =
+    meta.linkTargets !== undefined && meta.linkTargets.size > 0
+      ? relinkToPages(out, meta.linkTargets, firstPageOfFrame).relinked
+      : 0
 
   out.setTitle(meta.title)
   out.setProducer(PRODUCER)
@@ -134,6 +150,7 @@ export async function mergePdfs(
     textDrawn,
     textFallbacks,
     textSubstitutions,
+    linksRelinked,
     ...contents
   }
 }
