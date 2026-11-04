@@ -389,6 +389,10 @@ export function collectTextNodes(root: SceneNode): TextNode[] {
 
   const visit = (node: SceneNode): void => {
     if (node.visible === false) return
+    // 불리언 연산(합치기·빼기) 안의 글자는 글자가 아니라 도형의 재료다 — Figma 는 연산 결과를
+    // 한 도형으로 그리고 Type 3 를 쓰지 않는다. 숨기면 빼던 구멍이 메워지고(명판의 음각 글자),
+    // 다시 그리면 재료의 색이 도형 위에 얹힌다. 건드리지 않는다
+    if (node.type === 'BOOLEAN_OPERATION') return
     if (node.type === 'TEXT') out.push(node)
     if ('children' in node) {
       for (const child of node.children) visit(child)

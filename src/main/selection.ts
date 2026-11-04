@@ -220,6 +220,9 @@ async function scanNode(
 
     scan.images.push(...imageUsagesOf(current, clip))
 
+    // 불리언 연산의 자식은 도형의 재료다 — 내보내기도 그 안의 글자를 건드리지 않는다 (collectTextNodes)
+    if (current.type === 'BOOLEAN_OPERATION') continue
+
     if ('children' in current) {
       const inner = clipFor(current, clip)
       // 스택이라 뒤집어 넣어야 문서 순서대로 나온다 (children 도 한 번의 엔진 읽기다)

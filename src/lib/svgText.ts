@@ -26,6 +26,13 @@ export type SvgRun = {
   gaps?: number[]
   fill: RGB
   opacity: number
+  /**
+   * Figma 가 이 글자에 단 밑줄·취소선(`<text text-decoration>`)과 링크(`<tspan><a href>`).
+   * 모양이 다른 글자는 따로 된 <text> 로, 때로는 한 글자씩 흩어져 나온다 — 원문에서 위치를
+   * 찾아 세그먼트로 되짚기보다 SVG 가 말하는 것을 그대로 믿는 편이 확실하다
+   */
+  decoration?: 'UNDERLINE' | 'STRIKETHROUGH'
+  href?: string
 }
 
 export type ParseXml = (svg: string) => Document
@@ -117,12 +124,16 @@ export function parseSvgText(svg: string, parseXml: ParseXml): SvgRun[] {
       if (content.text === '') continue
 
       const style = readStyle(span, base)
+      const decoration = decorationOf(span) ?? decorationOf(textElement)
+      const href = hrefOf(span)
       runs.push({
         ...style,
         text: content.text,
         gaps: content.gaps,
         x: readNumber(span, 'x', readNumber(textElement, 'x', 0)),
-        y: readNumber(span, 'y', readNumber(textElement, 'y', 0))
+        y: readNumber(span, 'y', readNumber(textElement, 'y', 0)),
+        ...(decoration === undefined ? {} : { decoration }),
+        ...(href === undefined ? {} : { href })
       })
     }
   }
@@ -130,7 +141,22 @@ export function parseSvgText(svg: string, parseXml: ParseXml): SvgRun[] {
   return runs
 }
 
-type Style = Omit<SvgRun, 'text' | 'x' | 'y'>
+type Style = Omit<SvgRun, 'text' | 'x' | 'y' | 'decoration' | 'href'>
+
+function decorationOf(element: Element): SvgRun['decoration'] {
+  const raw = element.getAttribute('text-decoration') ?? ''
+  if (/underline/.test(raw)) return 'UNDERLINE'
+  if (/line-through/.test(raw)) return 'STRIKETHROUGH'
+  return undefined
+}
+
+function hrefOf(span: Element): string | undefined {
+  const anchors = span.getElementsByTagName('a')
+  if (anchors.length === 0) return undefined
+  const anchor = anchors[0]
+  const href = anchor.getAttribute('href') ?? anchor.getAttribute('xlink:href')
+  return href === null || href === '' ? undefined : href
+}
 
 /** <text> 를 감싼 요소들의 opacity 곱. 없으면 1 */
 function ancestorOpacity(element: Element): number {

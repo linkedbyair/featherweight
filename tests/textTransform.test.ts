@@ -3,7 +3,7 @@ import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNumber, StandardFonts } fro
 import { describe, expect, it, vi } from 'vitest'
 
 import { TextRunSource, TextSegment } from '../src/lib/types'
-import { flattenText, frameTransform, isAxisAligned } from '../src/main/text'
+import { collectTextNodes, flattenText, frameTransform, isAxisAligned } from '../src/main/text'
 import { FontProbe } from '../src/ui/fontkitAdapter'
 import { drawTextLayer, FontProvider, placementOf } from '../src/ui/textLayer'
 
@@ -265,5 +265,25 @@ describe('flattenText', () => {
       }
     })
     expect(flattenText(node)).toBe(false)
+  })
+})
+
+describe('collectTextNodes — 불리언 연산 안의 글자', () => {
+  it('합치기·빼기의 재료인 글자는 모으지 않는다 — 명판의 음각 글자가 메워지지 않게', () => {
+    const text = (name: string) => ({ type: 'TEXT', visible: true, name })
+    const root = {
+      type: 'FRAME',
+      visible: true,
+      children: [
+        text('label'),
+        {
+          type: 'BOOLEAN_OPERATION',
+          visible: true,
+          children: [{ type: 'RECTANGLE', visible: true }, text('cutout')]
+        },
+        { type: 'GROUP', visible: true, children: [text('caption')] }
+      ]
+    } as unknown as SceneNode
+    expect(collectTextNodes(root).map((node) => node.name)).toEqual(['label', 'caption'])
   })
 })

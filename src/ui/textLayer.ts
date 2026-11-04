@@ -268,19 +268,33 @@ export async function drawTextLayer(
 
     let cursor = 0
     const taken: Array<{ start: number; end: number }> = []
+    // SVG 가 밑줄·링크를 직접 말해 주면 그것을 쓴다 — 원문 위치 찾기는 그 정보가 없을 때만
+    const svgDecorations = runs.some((run) => run.decoration !== undefined)
+    const svgLinks = runs.some((run) => run.href !== undefined)
     for (const { run, chunks } of planned) {
       const positions = drawRun(page, run, placed.offset, placed.height, chunks, quiet)
       // 마커는 원문에 없는 글자다 — 링크·밑줄을 찾겠다고 원문에서 뒤지면 `1.` 같은 것이 엉뚱한
       // 자리에 맞아 커서가 앞질러 가고, 그다음 줄들이 통째로 밀린다
       if (markerAnchorOf(run) !== undefined) continue
-      const { links, decorations, next } = spansForRun(
-        source.characters,
-        cursor,
-        run.text,
-        source.segments,
-        taken
-      )
-      cursor = next
+      const located = spansForRun(source.characters, cursor, run.text, source.segments, taken)
+      cursor = located.next
+      const whole = { start: 0, end: run.text.length }
+      const decorations = svgDecorations
+        ? run.decoration === undefined
+          ? []
+          : [
+              {
+                ...whole,
+                kind: run.decoration,
+                ...styleFor(source.segments, run.decoration, run.text, source.characters)
+              }
+            ]
+        : located.decorations
+      const links = svgLinks
+        ? run.href === undefined
+          ? []
+          : [{ ...whole, url: run.href }]
+        : located.links
       if (decorations.length > 0 && !quiet)
         drawDecorations(
           page,
@@ -300,6 +314,27 @@ export async function drawTextLayer(
   }
 
   return result
+}
+
+/**
+ * SVG 가 밑줄이라고 한 run 의 모양 — 그 종류의 장식이 걸린 세그먼트에서 찾는다. 모양이 하나뿐이면
+ * 그것, 여럿이면 run 글자를 품은 세그먼트의 것. 기본 모양이면 아무것도 안 돌려준다
+ */
+function styleFor(
+  segments: readonly TextRunSource['segments'][number][],
+  kind: 'UNDERLINE' | 'STRIKETHROUGH',
+  text: string,
+  characters: string
+): { style?: TextRunSource['segments'][number]['decoration'] } {
+  const candidates = segments.filter((segment) => segment.textDecoration === kind)
+  const styles = new Set(candidates.map((segment) => JSON.stringify(segment.decoration ?? null)))
+  const pick =
+    styles.size <= 1
+      ? candidates[0]
+      : (candidates.find((segment) =>
+          characters.slice(segment.start, segment.end).includes(text)
+        ) ?? candidates[0])
+  return pick?.decoration === undefined ? {} : { style: pick.decoration }
 }
 
 /** 따로 정한 선 색 — 불투명도가 있으면 그것도 */
