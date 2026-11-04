@@ -153,7 +153,9 @@ Hangul, does the weight match).
 These are kept as original outlines by design — the report tells you which nodes
 and why, and clicking a reason selects them on canvas:
 
-- Rotated or flipped text, text on a path
+- Text on a path, and text squashed to zero width or height. Rotated,
+  mirrored, skewed and scaled text — including text inside rotated groups —
+  is redrawn with the layer's own transform
 - Text with gradient/image fills, strokes, or effects (shadow, blur)
 - Underlined or struck-through text with a non-default look — wavy or dotted
   lines, or a custom offset, thickness or color. Plain underlines and

@@ -3,6 +3,7 @@
 import {
   beginText,
   closePath,
+  concatTransformationMatrix,
   endText,
   fill,
   lineTo,
@@ -255,9 +256,13 @@ export async function drawTextLayer(
       result.substitutions.push({ nodeId: source.nodeId, family, chars: [...chars] })
     }
 
+    const placed = placementOf(source, pageHeight)
+    if (placed.matrix !== null)
+      page.pushOperators(pushGraphicsState(), concatTransformationMatrix(...placed.matrix))
+
     let cursor = 0
     for (const { run, chunks } of planned) {
-      const positions = drawRun(page, run, source.offset, pageHeight, chunks)
+      const positions = drawRun(page, run, placed.offset, placed.height, chunks)
       // 마커는 원문에 없는 글자다 — 링크·밑줄을 찾겠다고 원문에서 뒤지면 `1.` 같은 것이 엉뚱한
       // 자리에 맞아 커서가 앞질러 가고, 그다음 줄들이 통째로 밀린다
       if (markerAnchorOf(run) !== undefined) continue
@@ -272,19 +277,53 @@ export async function drawTextLayer(
         drawDecorations(
           page,
           run,
-          source.offset,
-          pageHeight,
+          placed.offset,
+          placed.height,
           positions,
           decorations,
           chunks[0].probe
         )
       if (!options.links) continue
-      for (const span of links) addLink(page, run, source.offset, pageHeight, positions, span)
+      for (const span of links)
+        addLink(page, run, placed.offset, placed.height, positions, span, placed.toPage)
     }
+    if (placed.matrix !== null) page.pushOperators(popGraphicsState())
     result.drawn += 1
   }
 
   return result
+}
+
+type Matrix = [number, number, number, number, number, number]
+
+/** 글자를 놓을 좌표계 — 평행이동이면 쪽 좌표 그대로, 아니면 노드 좌표에 cm 을 건다 */
+type Placement = {
+  offset: { x: number; y: number }
+  /** drawRun 의 pageHeight 자리 — 노드 좌표계에서는 0 이라 y 가 -v 가 된다 */
+  height: number
+  matrix: Matrix | null
+  /** 그린 좌표 → 쪽 좌표. 주석(링크)은 cm 을 안 받으니 직접 옮긴다 */
+  toPage: (x: number, y: number) => [number, number]
+}
+
+/**
+ * Figma 변환 x = a·u + c·v + e, y↓ = b·u + d·v + f 를 PDF 로. 노드 좌표계에서 drawRun 은
+ * (u, w = -v) 에 그리므로 X = a·u − c·w + e, Y↑ = H − y↓ = −b·u + d·w + (H − f).
+ */
+export function placementOf(source: TextRunSource, pageHeight: number): Placement {
+  if (source.transform === undefined)
+    return { offset: source.offset, height: pageHeight, matrix: null, toPage: (x, y) => [x, y] }
+  const [a, b, c, d, e, f] = source.transform
+  const matrix: Matrix = [a, -b, -c, d, e, pageHeight - f]
+  return {
+    offset: source.offset,
+    height: 0,
+    matrix,
+    toPage: (x, y) => [
+      matrix[0] * x + matrix[2] * y + matrix[4],
+      matrix[1] * x + matrix[3] * y + matrix[5]
+    ]
+  }
 }
 
 /**
@@ -298,18 +337,28 @@ function addLink(
   offset: { x: number; y: number },
   pageHeight: number,
   positions: readonly number[],
-  span: LinkSpan
+  span: LinkSpan,
+  toPage: (x: number, y: number) => [number, number] = (x, y) => [x, y]
 ): void {
   const size = run.fontSize
   const x0 = positions[span.start] ?? positions[0] ?? offset.x + run.x
   const x1 = positions[span.end] ?? positions[positions.length - 1] ?? x0
   if (x1 <= x0) return
   const baseline = pageHeight - snappedBaseline(offset, run)
+  const bottom = baseline - size * 0.25
+  const top = baseline + size * 0.9
+  // 반시계 방향 네 꼭짓점 — 기울어진 글자면 Rect 는 그것을 덮는 상자, QuadPoints 가 실제 모양이다
+  const corners = [toPage(x0, bottom), toPage(x1, bottom), toPage(x1, top), toPage(x0, top)]
+  const xs = corners.map(([x]) => x)
+  const ys = corners.map(([, y]) => y)
+  const rect = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]
+  const straight = corners[0][1] === corners[1][1] && corners[0][0] === corners[3][0]
   const context = page.doc.context
   const annot = context.obj({
     Type: 'Annot',
     Subtype: 'Link',
-    Rect: [x0, baseline - size * 0.25, x1, baseline + size * 0.9],
+    Rect: rect,
+    ...(straight ? {} : { QuadPoints: corners.flat() }),
     Border: [0, 0, 0],
     A: { Type: 'Action', S: 'URI', URI: PDFString.of(span.url) }
   })

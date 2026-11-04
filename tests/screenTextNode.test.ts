@@ -232,3 +232,38 @@ describe('screenTextNode — 밑줄·취소선', () => {
     ).toEqual({ ok: true })
   })
 })
+
+describe('screenTextNode — 회전·뒤집기·기울이기', () => {
+  // 실제 파일(WCMA 사인 도면)에 있는 변환들 — 34° 기울인 평면도, 거울에 비친 사인, 90° 세운 이름
+  const transforms: Record<string, number[][]> = {
+    rotated90: [
+      [0, 1, 40],
+      [-1, 0, 300]
+    ],
+    sheared: [
+      [0.8320503, 0, 10],
+      [-0.5547002, 1, 50]
+    ],
+    mirrored: [
+      [-1, 0, 500],
+      [0, 1, 20]
+    ]
+  }
+
+  for (const [name, absoluteTransform] of Object.entries(transforms)) {
+    it(`${name} 텍스트도 다시 그린다 — 변환은 PDF 의 cm 으로 옮긴다`, () => {
+      expect(screenTextNode(fakeText([{}], { absoluteTransform }))).toEqual({ ok: true })
+    })
+  }
+
+  it('한 축이 눌려 역행렬이 없는 변환만 아웃라인으로 둔다', () => {
+    const flat = [
+      [1, 1, 0],
+      [1, 1, 0]
+    ]
+    expect(screenTextNode(fakeText([{}], { absoluteTransform: flat }))).toEqual({
+      ok: false,
+      reason: { code: 'reject.rotated' }
+    })
+  })
+})

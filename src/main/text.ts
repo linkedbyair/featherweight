@@ -6,6 +6,7 @@
 import { transformScale } from '../lib/imageTarget'
 import { FontRef, Reason, TextRunSource, TextSegment } from '../lib/types'
 import { withTimeout } from '../lib/withTimeout'
+import { markTemporary } from './temporary'
 
 /** SVG 추출 한도 — 응답 없는 노드 하나가 내보내기 전체를 멈추지 않게 */
 const SVG_TIMEOUT_MS = 15_000
@@ -16,12 +17,22 @@ export type TextCandidate = {
   fontRefs: FontRef[]
 }
 
-/** 회전 성분이 있으면 좌표 변환이 단순 평행이동이 아니게 된다 — 그런 노드는 건드리지 않는다. */
-function isAxisAligned(node: TextNode): boolean {
-  const [[a, b], [c, d]] = node.absoluteTransform
-  const rotated = Math.abs(b) > 1e-6 || Math.abs(c) > 1e-6
-  const flipped = a < 0 || d < 0
-  return !rotated && !flipped
+/** 똑바로 세운 사본을 둘 자리 — 내보내는 클론들(exporter 의 OFFSCREEN_X)과도 겹치지 않게 더 멀리 */
+const STRAIGHT_COPY_X = -200_000
+
+/** 회전·뒤집기가 없는 변환 — offset 만으로 자리를 옮긴다 (예전 그대로의 길) */
+export function isAxisAligned(transform: Transform): boolean {
+  const [[a, c], [b, d]] = transform
+  return Math.abs(b) <= 1e-6 && Math.abs(c) <= 1e-6 && a > 0 && d > 0
+}
+
+/**
+ * 회전·뒤집기·기울이기·배율이 섞인 변환도 PDF 의 cm 하나로 그대로 옮길 수 있다. 못 옮기는 것은
+ * 역행렬이 없는(한 축이 0 으로 눌린) 변환뿐이다 — 글자가 선으로 보이는 자리라 다시 그릴 것도 없다.
+ */
+function isInvertible(node: TextNode): boolean {
+  const [[a, c], [b, d]] = node.absoluteTransform
+  return Math.abs(a * d - b * c) > 1e-6
 }
 
 /**
@@ -34,7 +45,7 @@ export function screenTextNode(
 ): { ok: true } | { ok: false; reason: Reason } {
   if (node.visible === false) return { ok: false, reason: { code: 'reject.hidden' } }
   if (node.characters === '') return { ok: false, reason: { code: 'reject.empty' } }
-  if (!isAxisAligned(node)) return { ok: false, reason: { code: 'reject.rotated' } }
+  if (!isInvertible(node)) return { ok: false, reason: { code: 'reject.rotated' } }
 
   // 패스 위 텍스트는 TEXT 가 아니라 TEXT_PATH 노드라 collectTextNodes 에서 이미 빠진다.
 
@@ -180,9 +191,13 @@ export async function extractText(
   node: TextNode,
   frame: SceneNode
 ): Promise<TextCandidate | { failed: Reason }> {
+  // 축에 맞지 않는 글자는 똑바로 세운 사본에서 SVG·잉크 폭을 읽고, 원래 변환은 따로 넘긴다.
+  // UI 가 그 변환을 cm 으로 걸고 사본 기준(왼쪽 위가 원점)으로 그린다 (ui/textLayer)
+  const straight = isAxisAligned(node.absoluteTransform) ? null : straightCopy(node)
+  const subject = straight ?? node
   try {
     const svg = await withTimeout(
-      node.exportAsync({
+      subject.exportAsync({
         format: 'SVG_STRING',
         svgOutlineText: false,
         useAbsoluteBounds: true
@@ -191,7 +206,7 @@ export async function extractText(
       node.name
     )
 
-    const box = node.absoluteBoundingBox
+    const box = subject.absoluteBoundingBox
     const frameBox = frame.absoluteBoundingBox
     if (box === null || frameBox === null) return { failed: { code: 'reject.noBounds' } }
 
@@ -246,8 +261,8 @@ export async function extractText(
     const fontRefs = segments.map((segment) => segment.fontName)
 
     // Figma 가 그린 잉크 폭 — UI 가 우리 폰트로 놓은 폭과 견줘 다른 판의 폰트를 잡는다
-    const render = node.absoluteRenderBounds
-    const scale = transformScale(node.absoluteTransform)
+    const render = subject.absoluteRenderBounds
+    const scale = transformScale(subject.absoluteTransform)
     const inkWidth =
       render === null || !(scale.x > 0) || !(render.width > 0) ? undefined : render.width / scale.x
 
@@ -258,9 +273,19 @@ export async function extractText(
         nodeId: node.id,
         characters: node.characters,
         svg,
-        offset: { x: box.x - frameBox.x, y: box.y - frameBox.y },
+        offset:
+          straight === null
+            ? { x: box.x - frameBox.x, y: box.y - frameBox.y }
+            : // 사본의 원점은 자기 왼쪽 위다 — SVG 의 상자와 노드의 좌표계가 일치한다
+              {
+                x: box.x - straight.absoluteTransform[0][2],
+                y: box.y - straight.absoluteTransform[1][2]
+              },
         segments,
-        ...(inkWidth === undefined ? {} : { inkWidth })
+        ...(inkWidth === undefined ? {} : { inkWidth }),
+        ...(straight === null
+          ? {}
+          : { transform: frameTransform(node.absoluteTransform, frameBox) })
       }
     }
   } catch (error) {
@@ -270,7 +295,37 @@ export async function extractText(
         params: { message: error instanceof Error ? error.message : String(error) }
       }
     }
+  } finally {
+    if (straight !== null && !straight.removed) straight.remove()
   }
+}
+
+/**
+ * 변환을 걷어 낸 사본. 같은 부모에 두면 부모의 회전을 다시 받으므로 페이지 직속으로 옮긴다.
+ * 폭·높이·자동 크기·글자 스타일은 노드 자신의 것이라 그대로 따라온다. 내보내기가 죽어도
+ * 남은 정리(removeLeftoverClones)가 지우도록 표식을 단다.
+ */
+function straightCopy(node: TextNode): TextNode {
+  const copy = node.clone()
+  figma.currentPage.appendChild(copy)
+  copy.relativeTransform = [
+    [1, 0, STRAIGHT_COPY_X],
+    [0, 1, 0]
+  ]
+  markTemporary(copy)
+  return copy
+}
+
+/**
+ * 노드 좌표(u, v) → 프레임 좌표(아래로 +y). Figma 의 [[a, c, e], [b, d, f]] 를 [a, b, c, d, e, f] 로
+ * 펴고 평행이동을 내보내는 프레임의 왼쪽 위 기준으로 옮긴다.
+ */
+export function frameTransform(
+  transform: Transform,
+  frameBox: { x: number; y: number }
+): [number, number, number, number, number, number] {
+  const [[a, c, e], [b, d, f]] = transform
+  return [a, b, c, d, e - frameBox.x, f - frameBox.y]
 }
 
 /** 클론 안의 텍스트 노드를 모은다. */

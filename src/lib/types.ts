@@ -167,6 +167,12 @@ export type TextRunSource = {
    * 우리 폰트로 같은 줄을 놓은 폭과 견줘 "같은 이름의 다른 판" 을 잡는다. 없으면 검사하지 않는다.
    */
   inkWidth?: number
+  /**
+   * 축에 맞지 않는 텍스트(회전·뒤집기·기울이기)의 변환. 노드 좌표 (u, v) 를 프레임 좌표로 —
+   * x = a·u + c·v + e, y = b·u + d·v + f (y 는 아래로, 프레임 왼쪽 위 기준). 이때 svg·offset 은
+   * 노드 자신의 좌표계다. 없으면 offset 만큼 평행이동이다.
+   */
+  transform?: [number, number, number, number, number, number]
   segments: TextSegment[]
 }
 

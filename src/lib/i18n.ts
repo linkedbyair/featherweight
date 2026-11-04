@@ -904,8 +904,8 @@ const MESSAGES = {
     ko: '내용이 없는 텍스트 레이어'
   },
   'reject.rotated': {
-    en: 'Rotated or flipped text',
-    ko: '회전 또는 반전된 텍스트'
+    en: 'Text squashed flat (zero width or height)',
+    ko: '한 축이 0 으로 눌린 텍스트'
   },
   'reject.mixedFill': {
     en: 'Mixed fill settings',
