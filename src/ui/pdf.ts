@@ -1,7 +1,8 @@
 // PDF 머지·저장. mergePdfs 는 DOM 을 안 쓰므로 Node 에서 테스트한다. (PRD §11)
 
 import { t } from '../lib/i18n'
-import { Reason } from '../lib/types'
+import { NODE_LINK_SCHEME } from '../lib/figmaLinks'
+import { LinkArea, Reason } from '../lib/types'
 import {
   PDFArray,
   PDFDict,
@@ -10,7 +11,8 @@ import {
   PDFNumber,
   PDFPage,
   PDFRawStream,
-  PDFStream
+  PDFStream,
+  PDFString
 } from 'pdf-lib'
 
 import { DrawResult, DrawSubstitution } from './textLayer'
@@ -30,6 +32,8 @@ export type MergeMeta = {
    * 이동으로 바꾼다 (ui/pdfLinks). 주지 않으면 링크를 건드리지 않는다.
    */
   linkTargets?: ReadonlyMap<string, number>
+  /** 프레임 index → 리액션 링크 자리. 첫 쪽에 자리표시 링크로 달고, 아래 relink 가 쪽 이동으로 바꾼다 */
+  linkAreas?: ReadonlyMap<number, readonly LinkArea[]>
 }
 
 export type MergeOutput = PdfContents & {
@@ -95,6 +99,25 @@ export type OutlineCost = {
 export const PRODUCER = 'Featherweight'
 
 /**
+ * 리액션 링크 자리를 링크 주석으로. URL 은 NODE 자리표시라 relinkToPages 가 쪽 이동으로 바꾸거나
+ * 지운다 — 대상이 이번 내보내기에 없으면 남지 않는다. 좌표는 프레임 기준(아래로 +y)이다.
+ */
+export function addAreaLinks(page: PDFPage, areas: readonly LinkArea[]): void {
+  const height = page.getHeight()
+  const context = page.doc.context
+  for (const area of areas) {
+    const annot = context.obj({
+      Type: 'Annot',
+      Subtype: 'Link',
+      Rect: [area.x, height - area.y - area.height, area.x + area.width, height - area.y],
+      Border: [0, 0, 0],
+      A: { Type: 'Action', S: 'URI', URI: PDFString.of(NODE_LINK_SCHEME + area.target) }
+    })
+    page.node.addAnnot(context.register(annot))
+  }
+}
+
+/**
  * 부분 PDF 들을 index 순으로 이어 붙인다.
  * 프레임 1개는 보통 1페이지지만, 여러 페이지가 나와도 순서대로 다 가져온다.
  */
@@ -117,6 +140,7 @@ export async function mergePdfs(
     firstPageOfFrame.set(part.index, out.getPageCount())
     for (const [index, page] of pages.entries()) {
       out.addPage(page)
+      if (index === 0) addAreaLinks(page, meta.linkAreas?.get(part.index) ?? [])
       if (meta.drawText === undefined) continue
       // 텍스트 좌표는 프레임 하나를 기준으로 잰 것이다. 한 프레임이 여러 쪽으로
       // 나뉘면 둘째 쪽부터는 그 좌표가 맞지 않는다 — 같은 문장을 쪽마다 겹쳐 그리게

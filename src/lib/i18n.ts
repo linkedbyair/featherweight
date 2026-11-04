@@ -287,6 +287,14 @@ const MESSAGES = {
     en: 'Only those characters are replaced, from Inter first, then Pretendard. When off, the whole layer is outlined instead.',
     ko: '없는 글자만 Inter, Pretendard 순으로 대체합니다. 끄면 해당 텍스트 레이어 전체를 아웃라인으로 내보냅니다.'
   },
+  'settings.flattenLeftovers': {
+    en: 'Draw text that can’t use its font as plain shapes',
+    ko: '폰트로 그릴 수 없는 텍스트는 도형으로 그리기'
+  },
+  'settings.flattenLeftoversSays': {
+    en: 'Instead of Figma’s Type 3 fonts, which some PDF apps (such as Bluebeam) and printers handle badly. The text looks the same and stays searchable; the file gets a little larger.',
+    ko: '일부 PDF 앱(Bluebeam 등)과 인쇄기가 잘못 다루는 Figma 의 Type 3 폰트 대신 도형으로 그립니다. 모양은 같고 검색도 되며, 파일이 조금 커집니다.'
+  },
   'settings.sectionImages': { en: 'Images', ko: '이미지' },
   /** 보이는 창만 잘라 넣기 — 기본 켬. 끄면 예전처럼 통째로 줄인다 (docs/IMAGE-CROP.md) */
   'settings.cropToVisible': {

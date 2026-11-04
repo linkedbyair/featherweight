@@ -55,6 +55,15 @@ export function OptionsPanel({
           <Text>{t('settings.glyphFallback')}</Text>
         </Checkbox>
         <Says text={t('settings.glyphFallbackSays')} />
+        <VerticalSpace space="small" />
+        <Checkbox
+          disabled={disabled || outlineAll}
+          onValueChange={(value: boolean) => onChange({ ...settings, flattenLeftovers: value })}
+          value={settings.flattenLeftovers}
+        >
+          <Text>{t('settings.flattenLeftovers')}</Text>
+        </Checkbox>
+        <Says text={t('settings.flattenLeftoversSays')} />
       </Section>
 
       <Section title={t('settings.sectionImages')}>

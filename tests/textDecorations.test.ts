@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { NODE_LINK_SCHEME } from '../src/lib/figmaLinks'
 import { TextRunSource, TextSegment } from '../src/lib/types'
 import { FontProbe } from '../src/ui/fontkitAdapter'
+import { decorationOf } from '../src/main/text'
 import { decorationMetrics, drawTextLayer, FontProvider } from '../src/ui/textLayer'
 
 const parseXml = (svg: string): Document =>
@@ -127,6 +128,46 @@ describe('drawTextLayer — 밑줄·취소선', () => {
     const plainPushed = vi.spyOn(plain.page, 'pushOperators')
     await drawTextLayer(plain.page, [source([segment(0, 12)])], plain.provider, parseXml)
     expect(filledBars(plainPushed.mock.calls)).toEqual([])
+  })
+})
+
+describe('drawTextLayer — 직접 정한 밑줄', () => {
+  it('Figma 가 정한 위치·두께로 긋는다 — 반올림한 기준선에서 윗변까지 글자 크기의 %', async () => {
+    const { page, provider } = await setup()
+    const pushed = vi.spyOn(page, 'pushOperators')
+    const custom = {
+      ...segment(0, 12, { decoration: 'UNDERLINE' }),
+      decoration: { top: -0.14, thickness: 0.05, color: { r: 1, g: 0, b: 0, a: 1 } }
+    }
+    await drawTextLayer(page, [source([custom])], provider, parseXml)
+    const bars = filledBars(pushed.mock.calls)
+    expect(bars).toHaveLength(1)
+    // 기준선 832, 12pt → 윗변 832 − 1.68, 두께 0.6
+    expect(bars[0].top).toBeCloseTo(830.32, 5)
+    expect(bars[0].bottom).toBeCloseTo(829.72, 5)
+    const ops = pushed.mock.calls.flat().map(String)
+    expect(ops).toContain('1 0 0 rg')
+  })
+})
+
+describe('decorationOf', () => {
+  it('% 와 px 을 em 으로, 선 색은 불투명도와 함께', () => {
+    expect(
+      decorationOf({
+        fontSize: 14,
+        textDecorationOffset: { unit: 'PERCENT', value: 12 },
+        textDecorationThickness: { unit: 'PIXELS', value: 1 },
+        textDecorationColor: { value: 'AUTO' }
+      } as never)
+    ).toEqual({ top: -0.12, thickness: 1 / 14 })
+    expect(
+      decorationOf({
+        fontSize: 9,
+        textDecorationOffset: { unit: 'AUTO' },
+        textDecorationThickness: { unit: 'AUTO' },
+        textDecorationColor: { value: 'AUTO' }
+      } as never)
+    ).toBeUndefined()
   })
 })
 

@@ -47,6 +47,11 @@ export type Settings = {
   /** 폰트에 없는 글자를 대체 폰트(Inter → Pretendard)로 그린다. 끄면 그 텍스트는 아웃라인 */
   glyphFallback: boolean
   /**
+   * 다시 그리지 못한 글자(획·그림자·폰트 없음 등)를 Figma 의 Type 3 폰트 대신 벡터로 내보내고,
+   * 보이지 않는 진짜 글자를 얹어 검색되게 한다. Type 3 를 잘못 다루는 앱(Bluebeam 등)·인쇄용
+   */
+  flattenLeftovers: boolean
+  /**
    * 보이는 창만 잘라 넣기 (docs/IMAGE-CROP.md). 끄면 예전처럼 이미지를 통째로 줄인다 —
    * 내보내기와 목표 용량 예측이 같이 꺼진다. 첫 배포의 도망갈 길.
    */
@@ -69,6 +74,7 @@ export const DEFAULT_SETTINGS: Settings = {
   embedText: true,
   keepLinks: true,
   glyphFallback: true,
+  flattenLeftovers: false,
   cropToVisible: true,
   fitToSize: false,
   fitTargetMb: 5
@@ -136,6 +142,11 @@ export type TextSegment = {
   fills: RGBA[]
   letterSpacing: { unit: 'PIXELS' | 'PERCENT'; value: number }
   textDecoration: string
+  /**
+   * 밑줄·취소선을 Figma 기본과 다르게 정했을 때만. em 단위 — top 은 기준선에서 선의 윗변(위로 +),
+   * thickness 는 두께. 없는 값은 폰트 메트릭, color 가 없으면 글자색
+   */
+  decoration?: { top?: number; thickness?: number; color?: RGBA }
   textCase: string
   /**
    * URL 은 그대로 링크 주석이 되고, NODE(Figma 안의 다른 레이어로 가는 링크)는 내보낸 PDF 안의
@@ -173,6 +184,11 @@ export type TextRunSource = {
    * 노드 자신의 좌표계다. 없으면 offset 만큼 평행이동이다.
    */
   transform?: [number, number, number, number, number, number]
+  /**
+   * 보이지 않게(렌더 모드 3) 그린다 — 원래 글자는 벡터로 바뀌어 보이고, 이것은 검색·복사·링크만
+   * 맡는다 (Settings.flattenLeftovers). 못 그리면 조용히 건너뛴다(사유는 이미 리포트에 있다)
+   */
+  invisible?: boolean
   segments: TextSegment[]
 }
 
@@ -418,7 +434,12 @@ export type PdfPart = {
    * 바꾸는 데 쓴다 (ui/pdfLinks). 대상이 내보내기 밖이면 키가 없다.
    */
   linkTargets?: Record<string, number>
+  /** 프로토타입 리액션이 걸린 레이어의 자리 — exportAsync PDF 에는 리액션 링크가 없다 (main/links) */
+  linkAreas?: LinkArea[]
 }
+
+/** 쪽 이동 링크를 달 자리. 프레임 왼쪽 위 기준, y 아래로. target 은 정규화한 노드 id */
+export type LinkArea = { x: number; y: number; width: number; height: number; target: string }
 
 export interface PdfPartHandler extends EventHandler {
   name: 'pdf:part'

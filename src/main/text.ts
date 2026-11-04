@@ -50,11 +50,24 @@ export function screenTextNode(
   // 패스 위 텍스트는 TEXT 가 아니라 TEXT_PATH 노드라 collectTextNodes 에서 이미 빠진다.
 
   const fills = node.fills
-  if (fills === figma.mixed) return { ok: false, reason: { code: 'reject.mixedFill' } }
-  if (!Array.isArray(fills) || fills.length === 0)
-    return { ok: false, reason: { code: 'reject.noFill' } }
-  if (fills.some((paint) => paint.type !== 'SOLID' || paint.visible === false)) {
-    return { ok: false, reason: { code: 'reject.nonSolidFill' } }
+  if (fills === figma.mixed) {
+    // 글자마다 색이 다른 것은 괜찮다 — SVG 가 색마다 <text> 를 따로 주고 run 이 그 색으로 그린다.
+    // 세그먼트 하나라도 단색 하나가 아니면(그라데이션·겹친 칠·숨긴 칠) 원래대로 둔다
+    const plain = node
+      .getStyledTextSegments(['fills'])
+      .every(
+        (segment) =>
+          segment.fills.length === 1 &&
+          segment.fills[0].type === 'SOLID' &&
+          segment.fills[0].visible !== false
+      )
+    if (!plain) return { ok: false, reason: { code: 'reject.mixedFill' } }
+  } else {
+    if (!Array.isArray(fills) || fills.length === 0)
+      return { ok: false, reason: { code: 'reject.noFill' } }
+    if (fills.some((paint) => paint.type !== 'SOLID' || paint.visible === false)) {
+      return { ok: false, reason: { code: 'reject.nonSolidFill' } }
+    }
   }
 
   const strokes = node.strokes
@@ -117,14 +130,50 @@ function screenDecoration(node: TextNode): Reason | null {
     if ((segment.textDecoration ?? 'NONE') === 'NONE') continue
     const style = segment.textDecorationStyle ?? 'SOLID'
     if (style !== 'SOLID') return { code: 'reject.decorated' }
-    if ((segment.textDecorationOffset?.unit ?? 'AUTO') !== 'AUTO')
-      return { code: 'reject.decorated' }
-    if ((segment.textDecorationThickness?.unit ?? 'AUTO') !== 'AUTO')
-      return { code: 'reject.decorated' }
-    if ((segment.textDecorationColor?.value ?? 'AUTO') !== 'AUTO')
+    // 밑줄의 위치·두께는 Figma 가 정한 대로 따라 그린다(decorationOf). 취소선의 위치는 기준을 아직
+    // 실측하지 않았다 — 직접 정했으면 원래대로
+    const custom =
+      (segment.textDecorationOffset?.unit ?? 'AUTO') !== 'AUTO' ||
+      (segment.textDecorationThickness?.unit ?? 'AUTO') !== 'AUTO'
+    if (custom && segment.textDecoration !== 'UNDERLINE') return { code: 'reject.decorated' }
+    const color = segment.textDecorationColor?.value ?? 'AUTO'
+    if (color !== 'AUTO' && (color.type !== 'SOLID' || color.visible === false))
       return { code: 'reject.decorated' }
   }
   return null
+}
+
+/**
+ * 세그먼트의 밑줄 모양 중 Figma 기본(폰트 메트릭·글자색)과 다른 것. 실측(WCMA 사인 도면, Union):
+ * 위치는 반올림한 기준선에서 선의 윗변까지, 두께와 함께 글자 크기의 % 또는 px 이다.
+ * 14% → 9pt 글자에서 1.26pt 아래, 5% → 0.45pt.
+ */
+export function decorationOf(
+  segment: Pick<
+    StyledTextSegment,
+    'fontSize' | 'textDecorationOffset' | 'textDecorationThickness' | 'textDecorationColor'
+  >
+): TextSegment['decoration'] {
+  const em = (value: { unit: string; value?: number } | null | undefined): number | undefined => {
+    if (value === null || value === undefined || value.value === undefined) return undefined
+    if (value.unit === 'PERCENT') return value.value / 100
+    if (value.unit === 'PIXELS')
+      return segment.fontSize > 0 ? value.value / segment.fontSize : undefined
+    return undefined
+  }
+  const offset = em(segment.textDecorationOffset as { unit: string; value?: number } | null)
+  const thickness = em(segment.textDecorationThickness as { unit: string; value?: number } | null)
+  const paint = segment.textDecorationColor?.value
+  const color =
+    paint !== undefined && paint !== 'AUTO' && paint.type === 'SOLID'
+      ? { r: paint.color.r, g: paint.color.g, b: paint.color.b, a: paint.opacity ?? 1 }
+      : undefined
+  if (offset === undefined && thickness === undefined && color === undefined) return undefined
+  return {
+    ...(offset === undefined ? {} : { top: -offset }),
+    ...(thickness === undefined ? {} : { thickness }),
+    ...(color === undefined ? {} : { color })
+  }
 }
 
 function isNormalBlend(mode: BlendMode): boolean {
@@ -221,7 +270,10 @@ export async function extractText(
         'hyperlink',
         'openTypeFeatures',
         'listOptions',
-        'indentation'
+        'indentation',
+        'textDecorationOffset',
+        'textDecorationThickness',
+        'textDecorationColor'
       ])
       .map((segment): TextSegment => ({
         start: segment.start,
@@ -239,6 +291,9 @@ export async function extractText(
           value: segment.letterSpacing.value
         },
         textDecoration: String(segment.textDecoration),
+        ...(segment.textDecoration === 'NONE' || decorationOf(segment) === undefined
+          ? {}
+          : { decoration: decorationOf(segment) }),
         listType: segment.listOptions?.type ?? 'NONE',
         indentation: segment.indentation ?? 0,
         textCase: String(segment.textCase),
@@ -430,4 +485,22 @@ function freezeFrame(frame: FrameNode): void {
 export function hideTextGlyphs(node: TextNode): void {
   freezeLayout(node.parent)
   node.visible = false
+}
+
+/**
+ * 글자를 같은 모양의 벡터로 바꾼다 (Settings.flattenLeftovers). 채움·획·효과·블렌드·마스크는
+ * 벡터가 이어받는다. 오토레이아웃 형제가 움직이지 않게 부모를 먼저 굳힌다. 실패하면 false —
+ * 그 글자는 Figma 의 Type 3 그대로 남는다.
+ */
+export function flattenText(node: TextNode): boolean {
+  try {
+    freezeLayout(node.parent)
+    const parent = node.parent
+    // 글자 자체가 마스크면 벡터가 마스크를 이어받는지 장담할 수 없다 — 가려지던 것이 드러나면 안 된다
+    if (parent === null || node.isMask) return false
+    figma.flatten([node], parent as BaseNode & ChildrenMixin, parent.children.indexOf(node))
+    return true
+  } catch {
+    return false
+  }
 }

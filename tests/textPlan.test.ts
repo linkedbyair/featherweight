@@ -37,6 +37,13 @@ describe('TextPlanCache', () => {
     expect(cache.get('frame', ['one', 'two'], 2)).toBeUndefined()
   })
 
+  it('rejects an invalid flattened-node index too', () => {
+    const cache = new TextPlanCache()
+    cache.set('frame', { ...plan(), hidden: [0], flattened: [5] })
+
+    expect(cache.get('frame', ['one', 'two'], 2)).toBeUndefined()
+  })
+
   it('clears plans at an export boundary', () => {
     const cache = new TextPlanCache()
     cache.set('frame', plan())

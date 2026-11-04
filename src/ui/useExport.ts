@@ -13,6 +13,7 @@ import {
   FitDirectResultHandler,
   FitMeasuredHandler,
   FitReport,
+  LinkArea,
   PdfPart,
   PdfPartHandler,
   Progress,
@@ -181,7 +182,9 @@ export function useExport(
         title: fileName.replace(/\.pdf$/i, ''),
         createdAt: new Date(),
         ownImageSizes: ownImageSizes(),
-        ...(wantsLinks.current ? { linkTargets: linkTargetsOf(collected) } : {}),
+        ...(wantsLinks.current
+          ? { linkTargets: linkTargetsOf(collected), linkAreas: linkAreasOf(collected) }
+          : {}),
         drawText: wantsText.current
           ? async (document, page, index) => {
               const part = collected.find((candidate) => candidate.index === index)
@@ -550,6 +553,13 @@ function logFit(fit: FitReport | null, actualBytes: number): FitReport | null {
     fit.calibration
   )
   return fit
+}
+
+/** 프레임 index → 리액션 링크 자리 */
+function linkAreasOf(parts: readonly PdfPart[]): Map<number, LinkArea[]> {
+  const areas = new Map<number, LinkArea[]>()
+  for (const part of parts) if (part.linkAreas !== undefined) areas.set(part.index, part.linkAreas)
+  return areas
 }
 
 /** 프레임마다 푼 링크 대상을 하나로 — 같은 노드는 어느 프레임이 풀어도 같은 프레임을 가리킨다 */

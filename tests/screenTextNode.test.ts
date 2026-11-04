@@ -199,31 +199,48 @@ describe('screenTextNode — 밑줄·취소선', () => {
     expect(screenTextNode(fakeText([{ textDecoration: 'UNDERLINE' }]))).toEqual({ ok: true })
   })
 
-  it('물결·점선, 직접 정한 위치·두께·색은 아웃라인으로 남긴다', () => {
+  it('물결·점선, 직접 정한 취소선 위치, 단색이 아닌 선 색은 아웃라인으로 남긴다', () => {
     expect(
       screenTextNode(fakeText([{ textDecoration: 'UNDERLINE', textDecorationStyle: 'WAVY' }]))
     ).toEqual(rejected)
     expect(
       screenTextNode(
         fakeText([
-          { textDecoration: 'UNDERLINE', textDecorationOffset: { unit: 'PIXELS', value: 2 } }
+          { textDecoration: 'STRIKETHROUGH', textDecorationOffset: { unit: 'PIXELS', value: 2 } }
         ])
       )
     ).toEqual(rejected)
     expect(
       screenTextNode(
         fakeText([
-          { textDecoration: 'UNDERLINE', textDecorationThickness: { unit: 'PERCENT', value: 10 } }
+          {
+            textDecoration: 'UNDERLINE',
+            textDecorationColor: { value: { type: 'GRADIENT_LINEAR' } as never }
+          }
         ])
       )
     ).toEqual(rejected)
+  })
+
+  it('직접 정한 밑줄 위치·두께와 단색 선 색은 그대로 따라 긋는다', () => {
+    expect(
+      screenTextNode(
+        fakeText([
+          {
+            textDecoration: 'UNDERLINE',
+            textDecorationOffset: { unit: 'PERCENT', value: 14 },
+            textDecorationThickness: { unit: 'PIXELS', value: 1 }
+          }
+        ])
+      )
+    ).toEqual({ ok: true })
     expect(
       screenTextNode(
         fakeText([
           { textDecoration: 'STRIKETHROUGH', textDecorationColor: { value: { type: 'SOLID' } } }
         ])
       )
-    ).toEqual(rejected)
+    ).toEqual({ ok: true })
   })
 
   it('장식이 없는 세그먼트의 장식 속성은 보지 않는다', () => {
@@ -265,5 +282,28 @@ describe('screenTextNode — 회전·뒤집기·기울이기', () => {
       ok: false,
       reason: { code: 'reject.rotated' }
     })
+  })
+})
+
+describe('screenTextNode — 글자마다 다른 색', () => {
+  const mixed = (figma as unknown as { mixed: symbol }).mixed
+  const solid = (r: number) => ({ type: 'SOLID', visible: true, color: { r, g: 0, b: 0 } })
+
+  it('세그먼트마다 단색이면 다시 그린다', () => {
+    const node = fakeText([], {
+      fills: mixed,
+      getStyledTextSegments: (fields: string[]) =>
+        fields.includes('fills') ? [{ fills: [solid(0)] }, { fills: [solid(1)] }] : []
+    })
+    expect(screenTextNode(node)).toEqual({ ok: true })
+  })
+
+  it('한 세그먼트라도 그라데이션이나 겹친 칠이면 아웃라인', () => {
+    const node = fakeText([], {
+      fills: mixed,
+      getStyledTextSegments: (fields: string[]) =>
+        fields.includes('fills') ? [{ fills: [solid(0)] }, { fills: [solid(1), solid(0)] }] : []
+    })
+    expect(screenTextNode(node)).toEqual({ ok: false, reason: { code: 'reject.mixedFill' } })
   })
 })

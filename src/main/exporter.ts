@@ -3,7 +3,7 @@
 import { PdfPart, Reason, Settings, TextRunSource, TMP_MARK_KEY, TMP_NODE_NAME } from '../lib/types'
 import { withTimeout } from '../lib/withTimeout'
 import { ImageManySender, ImageRequestSender, OriginalSink, shrinkImages } from './images'
-import { collectLinkTargets } from './links'
+import { collectLinks } from './links'
 import { ExportableNode, isExportable } from './selection'
 import { isTemporary, markTemporary } from './temporary'
 import {
@@ -11,6 +11,7 @@ import {
   detachInstances,
   extractText,
   hideTextGlyphs,
+  flattenText,
   screenTextNode,
   TextCandidate
 } from './text'
@@ -116,10 +117,10 @@ export async function exportFrame(
       node.name
     )
 
-    const linkTargets =
+    const { targets: linkTargets, areas: linkAreas } =
       context.frameOrder !== undefined && context.frameOrder.length > 0
-        ? await collectLinkTargets(node, context.frameOrder)
-        : {}
+        ? await collectLinks(node, context.frameOrder)
+        : { targets: {}, areas: [] }
 
     return {
       ok: true,
@@ -129,6 +130,7 @@ export async function exportFrame(
         bytes,
         text: text.sources,
         ...(Object.keys(linkTargets).length > 0 ? { linkTargets } : {}),
+        ...(linkAreas.length > 0 ? { linkAreas } : {}),
         stats: {
           imagesProcessed: images.processed,
           imagesCropped: images.cropped,
@@ -201,17 +203,21 @@ async function prepareText(
   const cloneTexts = collectTextNodes(clone)
   const originalTexts = collectTextNodes(original)
   const originalIds = originalTexts.map((node) => node.id)
+  const flatten = context.settings.flattenLeftovers === true
 
   if (planKey !== undefined) {
     const known = textPlans.get(planKey, originalIds, cloneTexts.length)
     if (known !== undefined) {
       for (const index of known.hidden) hideTextGlyphs(cloneTexts[index])
+      for (const index of known.flattened ?? []) flattenText(cloneTexts[index])
       return { sources: [...known.sources], fallbacks: [...known.fallbacks] }
     }
   }
 
   const fallbacks: Array<{ nodeId: string; reason: Reason }> = []
   const candidates: Array<{ index: number; candidate: TextCandidate }> = []
+  /** 다시 그리지 못한 노드 — flattenLeftovers 면 벡터로 바꾸고 보이지 않는 글자를 얹는다 */
+  const leftovers: Array<{ index: number; reportId: string; source?: TextRunSource }> = []
 
   for (let index = 0; index < cloneTexts.length; index += 1) {
     const node = cloneTexts[index]
@@ -220,6 +226,7 @@ async function prepareText(
     const screened = screenTextNode(node, clone)
     if (!screened.ok) {
       fallbacks.push({ nodeId: reportId, reason: screened.reason })
+      if (flatten && FLATTENABLE(screened.reason)) leftovers.push({ index, reportId })
       continue
     }
 
@@ -232,29 +239,45 @@ async function prepareText(
     candidates.push({ index, candidate: extracted })
   }
 
-  if (candidates.length === 0) {
-    if (planKey !== undefined)
-      textPlans.set(planKey, {
-        originalIds,
-        cloneCount: cloneTexts.length,
-        hidden: [],
-        sources: [],
-        fallbacks
-      })
-    return { sources: [], fallbacks }
+  const approved = new Set<string>()
+  if (candidates.length > 0) {
+    const verdict = await context.validateText(candidates.map(({ candidate }) => candidate.source))
+    fallbacks.push(...verdict.rejected)
+    for (const id of verdict.eligible) approved.add(id)
   }
 
-  const verdict = await context.validateText(candidates.map(({ candidate }) => candidate.source))
-  fallbacks.push(...verdict.rejected)
-
-  const approved = new Set(verdict.eligible)
   const sources: TextRunSource[] = []
   const hidden: number[] = []
   for (const { index, candidate } of candidates) {
-    if (!approved.has(candidate.source.nodeId)) continue
+    if (!approved.has(candidate.source.nodeId)) {
+      if (flatten)
+        leftovers.push({ index, reportId: candidate.source.nodeId, source: candidate.source })
+      continue
+    }
     hideTextGlyphs(candidate.node)
     sources.push(candidate.source)
     hidden.push(index)
+  }
+
+  // 남은 글자는 Figma 가 Type 3 폰트로 쓴다 — 일부 PDF 앱(Bluebeam 등)과 인쇄기가 잘못 다룬다.
+  // 벡터로 바꾸면 모양(획·그림자·장식 포함)은 Figma 가 그린 그대로이고 폰트는 사라진다.
+  // 검색·복사·링크를 잃지 않게, 같은 자리에 보이지 않는 진짜 글자를 얹는다(그릴 폰트가 있을 때)
+  const flattened: number[] = []
+  for (const leftover of leftovers) {
+    const node = cloneTexts[leftover.index]
+    let source = leftover.source
+    if (source === undefined) {
+      const extracted = await extractText(node, clone)
+      if (!('failed' in extracted)) source = extracted.source
+    }
+    if (!flattenText(node)) continue
+    flattened.push(leftover.index)
+    if (source !== undefined) {
+      // 폭 검사는 보이는 글자만의 일이다 — 보이지 않는 글자가 조금 어긋나도 검색에는 상관없다
+      const overlay: TextRunSource = { ...source, nodeId: leftover.reportId, invisible: true }
+      delete overlay.inkWidth
+      sources.push(overlay)
+    }
   }
 
   if (planKey !== undefined)
@@ -262,10 +285,20 @@ async function prepareText(
       originalIds,
       cloneCount: cloneTexts.length,
       hidden,
+      flattened,
       sources,
       fallbacks
     })
   return { sources, fallbacks }
+}
+
+/** 벡터로 바꿔도 모양이 그대로인 사유 — 숨김·빈 글자·눌린 변환은 바꿀 것이 없다 */
+function FLATTENABLE(reason: Reason): boolean {
+  return (
+    reason.code !== 'reject.hidden' &&
+    reason.code !== 'reject.empty' &&
+    reason.code !== 'reject.rotated'
+  )
 }
 
 const textPlans = new TextPlanCache()

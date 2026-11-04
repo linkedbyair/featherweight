@@ -50,3 +50,15 @@ export function linkUrlOf(hyperlink: { type: 'URL' | 'NODE'; value: string } | n
   if (hyperlink === null || hyperlink.value === '') return ''
   return hyperlink.type === 'URL' ? hyperlink.value : NODE_LINK_SCHEME + hyperlink.value
 }
+
+/** figma.com 링크의 파일 키 (`/proto/<key>/…`). Figma 링크가 아니면 null */
+export function fileKeyFromLink(url: string): string | null {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return null
+  }
+  if (!FIGMA_HOST.test(parsed.hostname) || !FIGMA_PATH.test(parsed.pathname)) return null
+  return parsed.pathname.split('/')[2] || null
+}

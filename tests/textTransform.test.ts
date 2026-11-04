@@ -3,7 +3,7 @@ import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNumber, StandardFonts } fro
 import { describe, expect, it, vi } from 'vitest'
 
 import { TextRunSource, TextSegment } from '../src/lib/types'
-import { frameTransform, isAxisAligned } from '../src/main/text'
+import { flattenText, frameTransform, isAxisAligned } from '../src/main/text'
 import { FontProbe } from '../src/ui/fontkitAdapter'
 import { drawTextLayer, FontProvider, placementOf } from '../src/ui/textLayer'
 
@@ -172,5 +172,98 @@ describe('drawTextLayer — 변환이 있는 텍스트', () => {
     expect(ops.some((op) => op.endsWith(' cm'))).toBe(false)
     const annot = page.doc.context.lookup(page.node.Annots()?.get(0), PDFDict)
     expect(annot.get(PDFName.of('QuadPoints'))).toBeUndefined()
+  })
+})
+
+describe('drawTextLayer — 벡터로 바꾼 글자 위의 보이지 않는 글자', () => {
+  it('렌더 모드 3 으로 그리고, 그린 수에도 리포트에도 안 넣는다', async () => {
+    const document = await PDFDocument.create()
+    const page = document.addPage([595, 842])
+    const font = await document.embedFont(StandardFonts.Helvetica)
+    const provider: FontProvider = {
+      get: async () => ({ ok: true, font, probe, covers: () => [] })
+    }
+    const pushed = vi.spyOn(page, 'pushOperators')
+    const result = await drawTextLayer(
+      page,
+      [
+        {
+          nodeId: '1:1',
+          characters: 'Main Entrance',
+          svg: SVG,
+          offset: { x: 0, y: 0 },
+          segments: [{ ...segment, textDecoration: 'UNDERLINE' }],
+          invisible: true
+        }
+      ],
+      provider,
+      parseXml
+    )
+    const ops = pushed.mock.calls.flat().map(String)
+    expect(ops).toContain('3 Tr')
+    expect(ops.some((op) => op === 'f')).toBe(false) // 밑줄은 벡터가 이미 그렸다
+    expect(result).toEqual({ drawn: 0, fallbacks: [], substitutions: [] })
+    // 링크는 단다 — 벡터에는 링크가 없다
+    expect(page.node.Annots()?.size()).toBe(1)
+  })
+
+  it('폰트를 못 구하면 조용히 건너뛴다', async () => {
+    const document = await PDFDocument.create()
+    const page = document.addPage([595, 842])
+    const provider: FontProvider = {
+      get: async () => ({ ok: false, reason: { code: 'font.missing' } }) as never
+    }
+    const result = await drawTextLayer(
+      page,
+      [
+        {
+          nodeId: '1:1',
+          characters: 'Main Entrance',
+          svg: SVG,
+          offset: { x: 0, y: 0 },
+          segments: [segment],
+          invisible: true
+        }
+      ],
+      provider,
+      parseXml
+    )
+    expect(result).toEqual({ drawn: 0, fallbacks: [], substitutions: [] })
+  })
+})
+
+describe('flattenText', () => {
+  function setup(isMask = false) {
+    const flatten = vi.fn()
+    const page = { type: 'PAGE', parent: null }
+    const parent = { type: 'GROUP', parent: page, children: [] as unknown[] }
+    const node = { type: 'TEXT', parent, isMask }
+    parent.children.push({ id: 'sibling' }, node)
+    Object.assign(globalThis, { figma: { flatten } })
+    return { flatten, parent, node: node as unknown as TextNode }
+  }
+
+  it('같은 부모의 같은 자리에서 벡터로 바꾼다', () => {
+    const { flatten, parent, node } = setup()
+    expect(flattenText(node)).toBe(true)
+    expect(flatten).toHaveBeenCalledWith([node], parent, 1)
+  })
+
+  it('글자 자체가 마스크면 건드리지 않는다', () => {
+    const { flatten, node } = setup(true)
+    expect(flattenText(node)).toBe(false)
+    expect(flatten).not.toHaveBeenCalled()
+  })
+
+  it('Figma 가 거절하면 false — 원래 글자 그대로 남는다', () => {
+    const { node } = setup()
+    Object.assign(globalThis, {
+      figma: {
+        flatten: () => {
+          throw new Error('nope')
+        }
+      }
+    })
+    expect(flattenText(node)).toBe(false)
   })
 })

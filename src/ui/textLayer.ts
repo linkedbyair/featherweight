@@ -23,7 +23,9 @@ import {
   setFillingRgbColor,
   setFontAndSize,
   setGraphicsState,
-  setTextMatrix
+  setTextMatrix,
+  setTextRenderingMode,
+  TextRenderingMode
 } from 'pdf-lib'
 
 import { catalogEntry } from '../lib/fontCatalog'
@@ -172,13 +174,16 @@ export async function drawTextLayer(
     // 목록 마커는 Figma 가 SVG 에 안 싣는다 — 우리가 런으로 만들어 끼운다.
     // 여기서 끼우면 폰트 해석·글리프 커버리지·대체 폰트·임베딩이 전부 그대로 따라온다.
     const marked = withMarkers(parsed, source)
+    // 보이지 않는 글자(벡터로 바꾼 노드 위)는 실패해도 리포트에 안 남긴다 — 사유는 이미 있다
+    const quiet = source.invisible === true
     if (marked.blocked !== null) {
-      result.fallbacks.push({ nodeId: source.nodeId, reason: marked.blocked })
+      if (!quiet) result.fallbacks.push({ nodeId: source.nodeId, reason: marked.blocked })
       continue
     }
     const runs = marked.runs
     if (runs.length === 0) {
-      result.fallbacks.push({ nodeId: source.nodeId, reason: { code: 'reject.svgEmpty' } })
+      if (!quiet)
+        result.fallbacks.push({ nodeId: source.nodeId, reason: { code: 'reject.svgEmpty' } })
       continue
     }
 
@@ -249,12 +254,13 @@ export async function drawTextLayer(
     }
 
     if (reason !== null) {
-      result.fallbacks.push({ nodeId: source.nodeId, reason })
+      if (!quiet) result.fallbacks.push({ nodeId: source.nodeId, reason })
       continue
     }
-    for (const [family, chars] of substituted) {
-      result.substitutions.push({ nodeId: source.nodeId, family, chars: [...chars] })
-    }
+    if (!quiet)
+      for (const [family, chars] of substituted) {
+        result.substitutions.push({ nodeId: source.nodeId, family, chars: [...chars] })
+      }
 
     const placed = placementOf(source, pageHeight)
     if (placed.matrix !== null)
@@ -262,7 +268,7 @@ export async function drawTextLayer(
 
     let cursor = 0
     for (const { run, chunks } of planned) {
-      const positions = drawRun(page, run, placed.offset, placed.height, chunks)
+      const positions = drawRun(page, run, placed.offset, placed.height, chunks, quiet)
       // 마커는 원문에 없는 글자다 — 링크·밑줄을 찾겠다고 원문에서 뒤지면 `1.` 같은 것이 엉뚱한
       // 자리에 맞아 커서가 앞질러 가고, 그다음 줄들이 통째로 밀린다
       if (markerAnchorOf(run) !== undefined) continue
@@ -273,7 +279,7 @@ export async function drawTextLayer(
         source.segments
       )
       cursor = next
-      if (decorations.length > 0)
+      if (decorations.length > 0 && !quiet)
         drawDecorations(
           page,
           run,
@@ -288,10 +294,27 @@ export async function drawTextLayer(
         addLink(page, run, placed.offset, placed.height, positions, span, placed.toPage)
     }
     if (placed.matrix !== null) page.pushOperators(popGraphicsState())
-    result.drawn += 1
+    if (!quiet) result.drawn += 1
   }
 
   return result
+}
+
+/** 따로 정한 선 색 — 불투명도가 있으면 그것도 */
+function colorOps(
+  page: PDFPage,
+  color: { r: number; g: number; b: number; a: number }
+): PDFOperator[] {
+  const ops: PDFOperator[] = []
+  if (color.a < 1) {
+    const state = page.node.newExtGState(
+      'GS',
+      page.doc.context.obj({ Type: 'ExtGState', ca: color.a, CA: color.a })
+    )
+    ops.push(setGraphicsState(state))
+  }
+  ops.push(setFillingRgbColor(color.r, color.g, color.b))
+  return ops
 }
 
 type Matrix = [number, number, number, number, number, number]
@@ -401,9 +424,16 @@ function drawDecorations(
     const x0 = positions[span.start] ?? positions[0]
     const x1 = positions[span.end] ?? positions[positions.length - 1]
     if (x0 === undefined || x1 === undefined || x1 <= x0) continue
-    const line = span.kind === 'UNDERLINE' ? metrics.underline : metrics.strikeout
+    const metric = span.kind === 'UNDERLINE' ? metrics.underline : metrics.strikeout
+    const line = {
+      top: span.style?.top ?? metric.top,
+      thickness: span.style?.thickness ?? metric.thickness
+    }
     const top = baseline + line.top * size
     const bottom = top - line.thickness * size
+    // 선 색을 따로 정했으면 그 색으로 — 덮어쓴 뒤 다음 선은 다시 글자색
+    const color = span.style?.color
+    if (color !== undefined) ops.push(pushGraphicsState(), ...colorOps(page, color))
     ops.push(
       moveTo(x0, bottom),
       lineTo(x1, bottom),
@@ -412,6 +442,7 @@ function drawDecorations(
       closePath(),
       fill()
     )
+    if (color !== undefined) ops.push(popGraphicsState())
     drawn += 1
   }
   ops.push(popGraphicsState())
@@ -553,7 +584,8 @@ function drawRun(
   run: SvgRun,
   offset: { x: number; y: number },
   pageHeight: number,
-  chunks: readonly DrawChunk[]
+  chunks: readonly DrawChunk[],
+  invisible = false
 ): number[] {
   const startX = offset.x + run.x
   const y = pageHeight - snappedBaseline(offset, run)
@@ -574,6 +606,8 @@ function drawRun(
   // characterSpacing 은 drawText 옵션이 아니다. PDF 연산자로 직접 건다.
   if (spacing !== 0) ops.push(setCharacterSpacing(spacing))
   ops.push(setFillingRgbColor(run.fill.r, run.fill.g, run.fill.b))
+  // 렌더 모드 3: 칠하지도 긋지도 않는다 — 검색·선택만 된다. 그래픽 상태라 Q 에서 풀린다
+  if (invisible) ops.push(setTextRenderingMode(TextRenderingMode.Invisible))
 
   let x = startX
   let unit = 0 // run.text 의 UTF-16 인덱스

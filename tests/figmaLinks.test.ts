@@ -1,9 +1,16 @@
 import { PDFDict, PDFDocument, PDFName, PDFString } from 'pdf-lib'
 import { describe, expect, it } from 'vitest'
 
-import { linkUrlOf, NODE_LINK_SCHEME, nodeIdFromLink, normalizeNodeId } from '../src/lib/figmaLinks'
+import {
+  fileKeyFromLink,
+  linkUrlOf,
+  NODE_LINK_SCHEME,
+  nodeIdFromLink,
+  normalizeNodeId
+} from '../src/lib/figmaLinks'
 import { spansForRun } from '../src/lib/textLinks'
 import { TextSegment } from '../src/lib/types'
+import { collectTargetIds } from '../src/main/links'
 import { mergePdfs } from '../src/ui/pdf'
 import { relinkToPages } from '../src/ui/pdfLinks'
 
@@ -170,5 +177,117 @@ describe('relinkToPages', () => {
     expect(merged.linksRelinked).toBe(0)
     const doc = await PDFDocument.load(merged.bytes)
     expect(linkOf(doc, 0)?.lookup(PDFName.of('A'), PDFDict)).toBeDefined()
+  })
+})
+
+describe('fileKeyFromLink', () => {
+  it('figma.com 링크의 파일 키, 아니면 null', () => {
+    expect(fileKeyFromLink('https://www.figma.com/proto/TC2oss/File?node-id=1-2')).toBe('TC2oss')
+    expect(fileKeyFromLink('https://3-form.com/tech-specs/1650')).toBeNull()
+  })
+})
+
+describe('collectTargetIds — 리액션 자리와 이 파일 figma.com 링크', () => {
+  const box = (x: number, y: number, width: number, height: number) => ({ x, y, width, height })
+
+  function fakeTree(): SceneNode {
+    const button = {
+      type: 'FRAME',
+      visible: true,
+      absoluteBoundingBox: box(110, 220, 80, 20),
+      reactions: [
+        {
+          trigger: { type: 'ON_CLICK' },
+          actions: [{ type: 'NODE', destinationId: '30:1', navigation: 'NAVIGATE' }]
+        },
+        {
+          trigger: { type: 'ON_HOVER' },
+          actions: [{ type: 'NODE', destinationId: '30:2', navigation: 'NAVIGATE' }]
+        }
+      ],
+      children: []
+    }
+    const text = {
+      type: 'TEXT',
+      visible: true,
+      characters: 'See Appendix A',
+      reactions: [],
+      getStyledTextSegments: () => [
+        { hyperlink: { type: 'URL', value: 'https://www.figma.com/proto/KEY/F?node-id=40-5' } },
+        { hyperlink: { type: 'URL', value: 'https://3-form.com/x' } }
+      ]
+    }
+    const hidden = {
+      type: 'FRAME',
+      visible: false,
+      reactions: [
+        {
+          trigger: { type: 'ON_CLICK' },
+          actions: [{ type: 'NODE', destinationId: '99:9', navigation: 'NAVIGATE' }]
+        }
+      ],
+      children: []
+    }
+    return {
+      type: 'FRAME',
+      visible: true,
+      reactions: [],
+      children: [button, text, hidden]
+    } as unknown as SceneNode
+  }
+
+  it('클릭 리액션은 자리까지, figma.com 텍스트 링크는 대상만, 숨은 레이어는 빼고', () => {
+    Object.assign(globalThis, { figma: {} })
+    const found = {
+      targets: new Set<string>(),
+      areas: [] as Array<{ box: unknown; target: string }>
+    }
+    collectTargetIds(fakeTree(), found as never, Date.now() + 1000)
+    expect([...found.targets].sort()).toEqual(['30:1', '30:2', '40:5'])
+    expect(found.areas).toEqual([{ box: box(110, 220, 80, 20), target: '30:1' }])
+  })
+
+  it('파일 키를 알면 다른 파일의 figma.com 링크는 대상이 아니다', () => {
+    Object.assign(globalThis, { figma: { fileKey: 'OTHER' } })
+    const found = { targets: new Set<string>(), areas: [] }
+    collectTargetIds(fakeTree(), found as never, Date.now() + 1000)
+    expect(found.targets.has('40:5')).toBe(false)
+  })
+})
+
+describe('addAreaLinks', () => {
+  it('리액션 자리는 머지 뒤 대상 쪽으로 가는 링크가 되고, 대상이 없으면 사라진다', async () => {
+    const blank = async (): Promise<Uint8Array> => {
+      const doc = await PDFDocument.create()
+      doc.addPage([200, 100])
+      return await doc.save()
+    }
+    const merged = await mergePdfs(
+      [
+        { index: 0, bytes: await blank() },
+        { index: 1, bytes: await blank() }
+      ],
+      {
+        title: 't',
+        createdAt: new Date(0),
+        linkTargets: new Map([['30:1', 1]]),
+        linkAreas: new Map([
+          [
+            0,
+            [
+              { x: 10, y: 20, width: 50, height: 10, target: '30:1' },
+              { x: 0, y: 0, width: 5, height: 5, target: '77:7' }
+            ]
+          ]
+        ])
+      }
+    )
+    expect(merged.linksRelinked).toBe(1)
+    const doc = await PDFDocument.load(merged.bytes)
+    expect(doc.getPages()[0].node.Annots()?.size()).toBe(1)
+    const annot = linkOf(doc, 0) as PDFDict
+    expect(destPageIndex(doc, annot)).toBe(1)
+    const rect = annot.lookup(PDFName.of('Rect'))?.toString()
+    expect(rect).toBe('[ 10 70 60 80 ]')
   })
 })

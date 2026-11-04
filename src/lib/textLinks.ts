@@ -16,7 +16,13 @@ import { TextSegment } from './types'
 export type LinkSpan = { start: number; end: number; url: string }
 
 /** 밑줄·취소선이 걸린 run 안의 글자 범위(run 기준 인덱스) */
-export type DecorationSpan = { start: number; end: number; kind: 'UNDERLINE' | 'STRIKETHROUGH' }
+export type DecorationSpan = {
+  start: number
+  end: number
+  kind: 'UNDERLINE' | 'STRIKETHROUGH'
+  /** 세그먼트가 정한 모양(TextSegment.decoration) — 없으면 폰트 메트릭과 글자색 */
+  style?: TextSegment['decoration']
+}
 
 /** 원문에서 run 의 글자가 시작·끝나는 자리(원문 인덱스). 원문의 무시 문자는 건너뛴다. */
 export function locateRun(
@@ -93,8 +99,14 @@ export function spansForRun(
     const kind = segment.textDecoration
     if (kind === 'UNDERLINE' || kind === 'STRIKETHROUGH') {
       const last = decorations[decorations.length - 1]
-      if (last !== undefined && last.kind === kind && last.end === start) last.end = end
-      else decorations.push({ start, end, kind })
+      const style = segment.decoration
+      const same =
+        last !== undefined &&
+        last.kind === kind &&
+        last.end === start &&
+        JSON.stringify(last.style) === JSON.stringify(style)
+      if (same) last.end = end
+      else decorations.push({ start, end, kind, ...(style === undefined ? {} : { style }) })
     }
   }
   return { links, decorations, next: runEnd }

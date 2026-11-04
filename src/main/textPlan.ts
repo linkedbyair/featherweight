@@ -6,6 +6,8 @@ export type TextPlan = {
   /** Detaching instances must produce the same text-node shape on every pass. */
   cloneCount: number
   hidden: readonly number[]
+  /** Leftover text nodes turned into vectors (Settings.flattenLeftovers). */
+  flattened?: readonly number[]
   sources: readonly TextRunSource[]
   fallbacks: ReadonlyArray<{ nodeId: string; reason: Reason }>
 }
@@ -26,7 +28,9 @@ export class TextPlanCache {
       plan.cloneCount !== cloneCount ||
       plan.originalIds.length !== originalIds.length ||
       plan.originalIds.some((id, index) => id !== originalIds[index]) ||
-      plan.hidden.some((index) => !Number.isInteger(index) || index < 0 || index >= cloneCount)
+      [...plan.hidden, ...(plan.flattened ?? [])].some(
+        (index) => !Number.isInteger(index) || index < 0 || index >= cloneCount
+      )
     ) {
       // Do not let a stale plan become reusable again on a later retry in the same export.
       this.plans.delete(frameId)

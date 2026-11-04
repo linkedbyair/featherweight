@@ -38,10 +38,11 @@ Korean line-break joiners no longer force outlines either.
 Keep hyperlinks). **OTF fonts** can be added now, not just TTF. The font
 folder picker explains itself.
 
-**Links between frames** — prototype connections (On click → Navigate to) and
-text links to other layers used to point at figma.com in the PDF. When the
-target is a frame in the same export, they now jump to that page inside the PDF
-instead (Advanced → Keep hyperlinks). Links to layers outside the export are
+**Links between frames** — prototype connections (On click → Navigate to), text
+links to other layers, and figma.com links into the same file now jump to the
+page inside the PDF when the target is a frame in the same export (Options →
+Keep hyperlinks). Figma's plugin export drops prototype connections entirely, so
+they're added back as clickable areas. Links to layers outside the export are
 left as they were.
 
 **New in 3.2** — pictures that are only partly visible are stored as just the
@@ -156,11 +157,13 @@ and why, and clicking a reason selects them on canvas:
 - Text on a path, and text squashed to zero width or height. Rotated,
   mirrored, skewed and scaled text — including text inside rotated groups —
   is redrawn with the layer's own transform
-- Text with gradient/image fills, strokes, or effects (shadow, blur)
-- Underlined or struck-through text with a non-default look — wavy or dotted
-  lines, or a custom offset, thickness or color. Plain underlines and
-  strikethroughs are redrawn from the font's own underline/strikeout metrics
-  (Figma's "skip ink" gaps under descenders aren't reproduced)
+- Text with gradient/image fills, strokes, or effects (shadow, blur). Text with
+  a different solid color per character is redrawn
+- Underlined or struck-through text with a wavy or dotted line, a gradient line
+  color, or a custom strikethrough position. Plain underlines and
+  strikethroughs are redrawn from the font's own metrics, and custom underline
+  offset, thickness and color follow Figma's values (Figma's "skip ink" gaps
+  under descenders aren't reproduced)
 - Text used as a mask or inside a masked group, text with a blend mode, text
   inside a translucent layer, under a layer blur or an unfilled shadow, or
   running outside a clipping frame — redrawn text can't take part in that
@@ -172,6 +175,11 @@ and why, and clicking a reason selects them on canvas:
   they keep their outlines (bulleted and numbered lists otherwise export as
   real text, since 3.1)
 - Text whose font file can't be obtained, or containing glyphs the font lacks
+
+Figma writes these as Type 3 fonts, which some PDF apps (Bluebeam, for one) and
+printers handle badly. Turn on **Draw text that can't use its font as plain
+shapes** to export them as vector shapes instead — they look the same, and an
+invisible copy in the real font keeps them searchable and keeps their links.
 
 ## Good to know
 
