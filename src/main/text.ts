@@ -92,6 +92,9 @@ export function screenTextNode(
   if (!isNormalBlend(node.blendMode)) return { ok: false, reason: { code: 'reject.blend' } }
   const composed = screenAncestors(node, root)
   if (composed !== null) return { ok: false, reason: composed }
+  // 다시 그린 글자는 쪽 맨 위에 얹힌다 — 위에 칠해진 레이어가 가리던 글자(간판 뒷면의 거울 글자 등)가
+  // 드러난다. 가려진 글자는 원래 자리·순서 그대로 두어야 한다
+  if (isCovered(node, root)) return { ok: false, reason: { code: 'reject.covered' } }
 
   // 위첨자·아래첨자: Figma 는 폰트에 위첨자 글리프가 없는 글자를 축소·이동해 합성하고, 한 레이어에
   // 있는 글자와 없는 글자가 섞이면 전부 합성으로 통일한다. 우리는 OpenType sups/subs 를 켜서
@@ -174,6 +177,66 @@ export function decorationOf(
     ...(thickness === undefined ? {} : { thickness }),
     ...(color === undefined ? {} : { color })
   }
+}
+
+type Bounds = { x: number; y: number; width: number; height: number }
+
+function overlaps(a: Bounds | null, b: Bounds | null): boolean {
+  if (a === null || b === null) return false
+  const slack = 0.5
+  return (
+    a.x < b.x + b.width - slack &&
+    b.x < a.x + a.width - slack &&
+    a.y < b.y + b.height - slack &&
+    b.y < a.y + a.height - slack
+  )
+}
+
+const CONTAINERS = new Set(['FRAME', 'GROUP', 'SECTION', 'INSTANCE', 'COMPONENT', 'COMPONENT_SET'])
+
+function paints(node: SceneNode): boolean {
+  const visible = (list: unknown): boolean =>
+    Array.isArray(list) &&
+    list.some(
+      (paint: Paint) =>
+        paint.visible !== false && (paint.opacity === undefined || paint.opacity > 0)
+    )
+  return ('fills' in node && visible(node.fills)) || ('strokes' in node && visible(node.strokes))
+}
+
+/** 이 노드(또는 그 안의 무언가)가 box 위에 칠해지는가. 글자끼리 겹치는 것은 보지 않는다 */
+function coversBox(node: SceneNode, box: Bounds): boolean {
+  if (node.visible === false) return false
+  if ('opacity' in node && node.opacity === 0) return false
+  if (node.type === 'TEXT') return false
+  if (!overlaps('absoluteRenderBounds' in node ? node.absoluteRenderBounds : null, box))
+    return false
+  if (!CONTAINERS.has(node.type)) return true
+  if (paints(node)) return true
+  return 'children' in node && node.children.some((child) => coversBox(child, box))
+}
+
+/**
+ * 순서상 이 글자 위에(같은 부모의 뒤 형제, 조상들의 뒤 형제) 칠해지는 것이 글자 자리와 겹치는가.
+ * 겹침은 상자로만 본다 — 가로지르는 치수선 같은 것도 걸리지만, 걸린 글자는 벡터로 바뀌어(설정에
+ * 따라) 모양은 그대로이니 틀리는 것보다 낫다.
+ */
+export function isCovered(node: TextNode, root: BaseNode | undefined): boolean {
+  const box = node.absoluteRenderBounds
+  if (box === null) return false
+  for (let current: BaseNode = node; current.parent !== null && current !== root;) {
+    const parent: BaseNode & ChildrenMixin = current.parent
+    if (parent.type === 'PAGE' || parent.type === 'DOCUMENT') break
+    const siblings = parent.children
+    for (
+      let index = siblings.indexOf(current as SceneNode) + 1;
+      index < siblings.length;
+      index += 1
+    )
+      if (coversBox(siblings[index], box)) return true
+    current = parent
+  }
+  return false
 }
 
 function isNormalBlend(mode: BlendMode): boolean {
@@ -492,19 +555,84 @@ export function hideTextGlyphs(node: TextNode): void {
 }
 
 /**
- * 글자를 같은 모양의 벡터로 바꾼다 (Settings.flattenLeftovers). 채움·획·효과·블렌드·마스크는
- * 벡터가 이어받는다. 오토레이아웃 형제가 움직이지 않게 부모를 먼저 굳힌다. 실패하면 false —
- * 그 글자는 Figma 의 Type 3 그대로 남는다.
+ * Figma 가 그림 글자(이모지)로 그리는 문자. ♿ 같은 것 — 폰트에 없어서 Figma 가 색 이모지로 채운다.
+ * flatten 은 이런 글자가 섞인 레이어에서 그 줄의 다른 글자까지 EMOJI 칠로 바꿔 지운다(실측: WCMA
+ * 주차 표지 "f03.09–10 ♿ EV Charging" 에서 코드와 ♿ 가 사라졌다)
  */
-export function flattenText(node: TextNode): boolean {
+const PICTOGRAPH =
+  /[\u2600-\u27BF\u2B00-\u2BFF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|\uD83E[\uDC00-\uDFFF]/
+
+/**
+ * 글자를 같은 모양의 도형으로 바꾼다 (Settings.flattenLeftovers). 보통은 벡터로 — 채움·획·효과·
+ * 블렌드는 벡터가 이어받는다. 이모지가 섞였으면 Figma 가 그린 그대로의 4배 그림으로 바꾼다.
+ * 오토레이아웃 형제가 움직이지 않게 부모를 먼저 굳힌다. 실패하면 false — Type 3 그대로 남는다.
+ */
+export async function flattenText(node: TextNode): Promise<boolean> {
   try {
-    freezeLayout(node.parent)
     const parent = node.parent
-    // 글자 자체가 마스크면 벡터가 마스크를 이어받는지 장담할 수 없다 — 가려지던 것이 드러나면 안 된다
+    // 글자 자체가 마스크면 도형이 마스크를 이어받는지 장담할 수 없다 — 가려지던 것이 드러나면 안 된다
     if (parent === null || node.isMask) return false
-    figma.flatten([node], parent as BaseNode & ChildrenMixin, parent.children.indexOf(node))
+    if (PICTOGRAPH.test(node.characters)) return await rasterizeText(node)
+    freezeLayout(parent)
+    const vector = figma.flatten(
+      [node],
+      parent as BaseNode & ChildrenMixin,
+      parent.children.indexOf(node)
+    )
+    await clearUnexportablePaints(vector)
     return true
   } catch {
     return false
   }
+}
+
+/** flatten 이 남긴 내보낼 수 없는 칠(EMOJI 등)이 있는 영역은 벡터의 칠을 따르게 한다 */
+async function clearUnexportablePaints(vector: VectorNode): Promise<void> {
+  const network = vector.vectorNetwork
+  const known = new Set([
+    'SOLID',
+    'GRADIENT_LINEAR',
+    'GRADIENT_RADIAL',
+    'GRADIENT_ANGULAR',
+    'GRADIENT_DIAMOND',
+    'IMAGE'
+  ])
+  const regions = network.regions ?? []
+  const broken = regions.some((region) => region.fills?.some((paint) => !known.has(paint.type)))
+  if (!broken) return
+  const solid = (Array.isArray(vector.fills) ? vector.fills : []).filter((paint) =>
+    known.has(paint.type)
+  )
+  await vector.setVectorNetworkAsync({
+    ...network,
+    regions: regions.map((region) =>
+      region.fills?.some((paint) => !known.has(paint.type)) ? { ...region, fills: solid } : region
+    )
+  })
+}
+
+/**
+ * Figma 가 그린 그대로를 4배 PNG 로 찍어 같은 자리에 놓고 글자는 숨긴다. 축에 맞는 글자만 —
+ * 돌아간 글자는 그림의 자리를 맞추기 어렵다.
+ */
+async function rasterizeText(node: TextNode): Promise<boolean> {
+  const bounds = node.absoluteRenderBounds
+  const parent = node.parent
+  if (bounds === null || parent === null || !isAxisAligned(node.absoluteTransform)) return false
+  const bytes = await node.exportAsync({ format: 'PNG', constraint: { type: 'SCALE', value: 4 } })
+  freezeLayout(parent)
+  const image = figma.createImage(bytes)
+  const picture = figma.createRectangle()
+  picture.name = node.name
+  picture.resize(Math.max(bounds.width, 0.01), Math.max(bounds.height, 0.01))
+  picture.fills = [{ type: 'IMAGE', imageHash: image.hash, scaleMode: 'FILL' }]
+  ;(parent as BaseNode & ChildrenMixin).insertChild(parent.children.indexOf(node) + 1, picture)
+  // 부모가 그룹이면 x·y 의 기준이 부모가 아니다 — 놓은 뒤 절대 위치의 차이만큼 옮긴다
+  const placed = picture.absoluteBoundingBox
+  if (placed !== null) {
+    picture.x += bounds.x - placed.x
+    picture.y += bounds.y - placed.y
+  }
+  node.visible = false
+  return true
 }

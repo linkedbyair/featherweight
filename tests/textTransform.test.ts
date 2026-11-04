@@ -3,7 +3,13 @@ import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNumber, StandardFonts } fro
 import { describe, expect, it, vi } from 'vitest'
 
 import { TextRunSource, TextSegment } from '../src/lib/types'
-import { collectTextNodes, flattenText, frameTransform, isAxisAligned } from '../src/main/text'
+import {
+  collectTextNodes,
+  flattenText,
+  frameTransform,
+  isAxisAligned,
+  isCovered
+} from '../src/main/text'
 import { FontProbe } from '../src/ui/fontkitAdapter'
 import { drawTextLayer, FontProvider, placementOf } from '../src/ui/textLayer'
 
@@ -233,29 +239,68 @@ describe('drawTextLayer — 벡터로 바꾼 글자 위의 보이지 않는 글�
 })
 
 describe('flattenText', () => {
-  function setup(isMask = false) {
-    const flatten = vi.fn()
+  function setup(options: { isMask?: boolean; characters?: string } = {}) {
+    const vector = {
+      vectorNetwork: {
+        vertices: [],
+        segments: [],
+        regions: [{ loops: [[0]], fills: [{ type: 'SOLID' }] }]
+      },
+      fills: [{ type: 'SOLID' }],
+      setVectorNetworkAsync: vi.fn(async () => undefined)
+    }
+    const flatten = vi.fn(() => vector)
     const page = { type: 'PAGE', parent: null }
     const parent = { type: 'GROUP', parent: page, children: [] as unknown[] }
-    const node = { type: 'TEXT', parent, isMask }
+    const node = {
+      type: 'TEXT',
+      parent,
+      isMask: options.isMask ?? false,
+      characters: options.characters ?? 'Area Name'
+    }
     parent.children.push({ id: 'sibling' }, node)
     Object.assign(globalThis, { figma: { flatten } })
-    return { flatten, parent, node: node as unknown as TextNode }
+    return { flatten, parent, vector, node: node as unknown as TextNode }
   }
 
-  it('같은 부모의 같은 자리에서 벡터로 바꾼다', () => {
-    const { flatten, parent, node } = setup()
-    expect(flattenText(node)).toBe(true)
+  it('같은 부모의 같은 자리에서 벡터로 바꾼다', async () => {
+    const { flatten, parent, node, vector } = setup()
+    expect(await flattenText(node)).toBe(true)
     expect(flatten).toHaveBeenCalledWith([node], parent, 1)
+    expect(vector.setVectorNetworkAsync).not.toHaveBeenCalled()
   })
 
-  it('글자 자체가 마스크면 건드리지 않는다', () => {
-    const { flatten, node } = setup(true)
-    expect(flattenText(node)).toBe(false)
+  it('flatten 이 남긴 EMOJI 칠 영역은 벡터의 칠로 되돌린다 — 글자가 사라지지 않게', async () => {
+    const { node, vector } = setup()
+    vector.vectorNetwork.regions = [
+      { loops: [[0]], fills: [{ type: 'EMOJI' }] },
+      { loops: [[1]], fills: [{ type: 'SOLID' }] }
+    ]
+    await flattenText(node)
+    expect(vector.setVectorNetworkAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        regions: [
+          { loops: [[0]], fills: [{ type: 'SOLID' }] },
+          { loops: [[1]], fills: [{ type: 'SOLID' }] }
+        ]
+      })
+    )
+  })
+
+  it('이모지(♿)가 섞인 글자는 flatten 하지 않는다 — 그림으로 바꾸는 길로 간다', async () => {
+    const { flatten, node } = setup({ characters: 'f03.09–10 ♿ EV Charging' })
+    // 그림으로 바꿀 자리(렌더 경계)가 없으면 아무것도 안 바꾸고 false
+    expect(await flattenText(node)).toBe(false)
     expect(flatten).not.toHaveBeenCalled()
   })
 
-  it('Figma 가 거절하면 false — 원래 글자 그대로 남는다', () => {
+  it('글자 자체가 마스크면 건드리지 않는다', async () => {
+    const { flatten, node } = setup({ isMask: true })
+    expect(await flattenText(node)).toBe(false)
+    expect(flatten).not.toHaveBeenCalled()
+  })
+
+  it('Figma 가 거절하면 false — 원래 글자 그대로 남는다', async () => {
     const { node } = setup()
     Object.assign(globalThis, {
       figma: {
@@ -264,7 +309,49 @@ describe('flattenText', () => {
         }
       }
     })
-    expect(flattenText(node)).toBe(false)
+    expect(await flattenText(node)).toBe(false)
+  })
+})
+
+describe('isCovered', () => {
+  const box = (x: number, y: number, width: number, height: number) => ({ x, y, width, height })
+  function scene(above: Record<string, unknown>) {
+    const page = { type: 'PAGE', parent: null, children: [] as unknown[] }
+    const frame = { type: 'FRAME', parent: page, children: [] as unknown[] }
+    const text = {
+      type: 'TEXT',
+      parent: frame,
+      visible: true,
+      absoluteRenderBounds: box(10, 10, 100, 20)
+    }
+    frame.children.push(text, { parent: frame, visible: true, ...above })
+    return { text: text as unknown as TextNode, frame: frame as unknown as BaseNode }
+  }
+
+  it('위에 칠해진 판이 글자 자리와 겹치면 가려진 것이다 — 간판 뒷면의 거울 글자', () => {
+    const { text, frame } = scene({
+      type: 'RECTANGLE',
+      absoluteRenderBounds: box(0, 0, 200, 50),
+      fills: [{ type: 'SOLID' }]
+    })
+    expect(isCovered(text, frame)).toBe(true)
+  })
+
+  it('겹치지 않거나, 칠 없는 그룹 안이 비었거나, 위의 것이 글자면 아니다', () => {
+    expect(
+      isCovered(
+        scene({ type: 'RECTANGLE', absoluteRenderBounds: box(300, 300, 10, 10), fills: [] }).text,
+        undefined
+      )
+    ).toBe(false)
+    const empty = scene({
+      type: 'GROUP',
+      absoluteRenderBounds: box(0, 0, 200, 50),
+      children: [{ type: 'RECTANGLE', visible: true, absoluteRenderBounds: box(150, 40, 10, 5) }]
+    })
+    expect(isCovered(empty.text, empty.frame)).toBe(false)
+    const text = scene({ type: 'TEXT', absoluteRenderBounds: box(0, 0, 200, 50) })
+    expect(isCovered(text.text, text.frame)).toBe(false)
   })
 })
 

@@ -209,7 +209,7 @@ async function prepareText(
     const known = textPlans.get(planKey, originalIds, cloneTexts.length)
     if (known !== undefined) {
       for (const index of known.hidden) hideTextGlyphs(cloneTexts[index])
-      for (const index of known.flattened ?? []) flattenText(cloneTexts[index])
+      for (const index of known.flattened ?? []) await flattenText(cloneTexts[index])
       return { sources: [...known.sources], fallbacks: [...known.fallbacks] }
     }
   }
@@ -270,7 +270,7 @@ async function prepareText(
       const extracted = await extractText(node, clone)
       if (!('failed' in extracted)) source = extracted.source
     }
-    if (!flattenText(node)) continue
+    if (!(await flattenText(node))) continue
     flattened.push(leftover.index)
     if (source !== undefined) {
       // 폭 검사는 보이는 글자만의 일이다 — 보이지 않는 글자가 조금 어긋나도 검색에는 상관없다

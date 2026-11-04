@@ -961,6 +961,10 @@ const MESSAGES = {
     en: 'Parent layer has a blur or a shadow without a fill',
     ko: '상위 레이어에 적용된 흐림 효과 또는 채우기 없는 그림자'
   },
+  'reject.covered': {
+    en: 'Covered by a layer above it',
+    ko: '위의 레이어에 가려진 텍스트'
+  },
   'reject.clipped': {
     en: 'Text extends beyond the clipping frame',
     ko: '클리핑 영역을 벗어난 텍스트'
