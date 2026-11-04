@@ -278,7 +278,9 @@ export async function drawTextLayer(
       if (markerAnchorOf(run) !== undefined) continue
       const located = spansForRun(source.characters, cursor, run.text, source.segments, taken)
       cursor = located.next
-      const whole = { start: 0, end: run.text.length }
+      // 밑줄은 글자에만 — run 끝에 붙은 띄어쓰기까지 그으면 Figma 보다 길게 나온다("Appendix ")
+      const lead = run.text.length - run.text.trimStart().length
+      const whole = { start: lead, end: Math.max(lead, run.text.trimEnd().length) }
       const decorations = svgDecorations
         ? run.decoration === undefined
           ? []
@@ -293,7 +295,7 @@ export async function drawTextLayer(
       const links = svgLinks
         ? run.href === undefined
           ? []
-          : [{ ...whole, url: run.href }]
+          : [{ start: 0, end: run.text.length, url: run.href }]
         : located.links
       if (decorations.length > 0 && !quiet)
         drawDecorations(
