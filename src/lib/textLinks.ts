@@ -28,7 +28,8 @@ export type DecorationSpan = {
 export function locateRun(
   characters: string,
   cursor: number,
-  runText: string
+  runText: string,
+  blocked: (start: number, end: number) => boolean = () => false
 ): { start: number; end: number } | null {
   for (let start = cursor; start < characters.length; start += 1) {
     let i = start
@@ -44,7 +45,7 @@ export function locateRun(
       i += 1
       j += 1
     }
-    if (j === runText.length) return { start, end: i }
+    if (j === runText.length && !blocked(start, i)) return { start, end: i }
   }
   return null
 }
@@ -67,11 +68,20 @@ export function spansForRun(
   characters: string,
   cursor: number,
   runText: string,
-  segments: readonly TextSegment[]
+  segments: readonly TextSegment[],
+  taken?: Array<{ start: number; end: number }>
 ): { links: LinkSpan[]; decorations: DecorationSpan[]; next: number } {
   if (runText === '') return { links: [], decorations: [], next: cursor }
-  const located = locateRun(characters, cursor, runText)
+  // Figma 는 모양(밑줄·색)이 다른 글자를 따로 <text> 로 뒤에 모아 쓴다 — "See Appendix A for…" 면
+  // "See ", " for…" 가 먼저 나오고 밑줄 친 "Appendix A" 가 마지막에 온다. 커서 뒤에서 못 찾으면
+  // 앞에서, 이미 맞춘 자리와 겹치지 않는 곳을 찾는다. 커서는 뒤로 돌리지 않는다
+  const overlaps = (start: number, end: number): boolean =>
+    taken?.some((range) => start < range.end && range.start < end) ?? false
+  const located =
+    locateRun(characters, cursor, runText, overlaps) ??
+    (taken === undefined ? null : locateRun(characters, 0, runText, overlaps))
   if (located === null) return { links: [], decorations: [], next: cursor }
+  taken?.push(located)
   const { start: at, end: runEnd } = located
 
   // 원문 인덱스 → run 기준 인덱스: 그 사이의 무시 문자는 run 에 없다
@@ -109,5 +119,5 @@ export function spansForRun(
       else decorations.push({ start, end, kind, ...(style === undefined ? {} : { style }) })
     }
   }
-  return { links, decorations, next: runEnd }
+  return { links, decorations, next: Math.max(cursor, runEnd) }
 }

@@ -267,6 +267,7 @@ export async function drawTextLayer(
       page.pushOperators(pushGraphicsState(), concatTransformationMatrix(...placed.matrix))
 
     let cursor = 0
+    const taken: Array<{ start: number; end: number }> = []
     for (const { run, chunks } of planned) {
       const positions = drawRun(page, run, placed.offset, placed.height, chunks, quiet)
       // 마커는 원문에 없는 글자다 — 링크·밑줄을 찾겠다고 원문에서 뒤지면 `1.` 같은 것이 엉뚱한
@@ -276,7 +277,8 @@ export async function drawTextLayer(
         source.characters,
         cursor,
         run.text,
-        source.segments
+        source.segments,
+        taken
       )
       cursor = next
       if (decorations.length > 0 && !quiet)

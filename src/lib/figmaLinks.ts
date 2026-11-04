@@ -26,6 +26,33 @@ const FIGMA_HOST = /(^|\.)figma\.com$/i
 const FIGMA_PATH = /^\/(proto|design|file|board|slides|deck)\//i
 
 /**
+ * URL 을 손으로 가른다. Figma 플러그인의 메인 스레드에는 `URL`·`URLSearchParams` 가 없다 —
+ * 그 안에서 `new URL()` 은 던지고, 링크 대상을 모으던 순회가 통째로 멈춘다.
+ */
+function splitUrl(url: string): { host: string; path: string; query: string } | null {
+  const match = /^https?:\/\/([^/?#]+)([^?#]*)(?:\?([^#]*))?/i.exec(url.trim())
+  if (match === null) return null
+  const host = match[1].replace(/:\d+$/, '').replace(/^[^@]*@/, '')
+  return { host, path: match[2] === '' ? '/' : match[2], query: match[3] ?? '' }
+}
+
+function queryParam(query: string, name: string): string | null {
+  for (const pair of query.split('&')) {
+    const at = pair.indexOf('=')
+    const key = at < 0 ? pair : pair.slice(0, at)
+    if (key === name) return at < 0 ? '' : pair.slice(at + 1).replace(/\+/g, ' ')
+  }
+  return null
+}
+
+/** figma.com 의 파일 링크면 그 조각들 */
+function figmaParts(url: string): { path: string; query: string } | null {
+  const parts = splitUrl(url)
+  if (parts === null || !FIGMA_HOST.test(parts.host) || !FIGMA_PATH.test(parts.path)) return null
+  return parts
+}
+
+/**
  * 링크가 가리키는 Figma 노드 id. Figma 링크가 아니거나 node-id 가 없으면 null.
  * 자리표시 스킴도 여기서 푼다 — 호출자는 두 경우를 구분할 필요가 없다.
  */
@@ -34,14 +61,9 @@ export function nodeIdFromLink(url: string): string | null {
     const id = url.slice(NODE_LINK_SCHEME.length)
     return id === '' ? null : normalizeNodeId(id)
   }
-  let parsed: URL
-  try {
-    parsed = new URL(url)
-  } catch {
-    return null
-  }
-  if (!FIGMA_HOST.test(parsed.hostname) || !FIGMA_PATH.test(parsed.pathname)) return null
-  const raw = parsed.searchParams.get('node-id')
+  const parts = figmaParts(url)
+  if (parts === null) return null
+  const raw = queryParam(parts.query, 'node-id')
   return raw === null || raw === '' ? null : normalizeNodeId(raw)
 }
 
@@ -53,12 +75,6 @@ export function linkUrlOf(hyperlink: { type: 'URL' | 'NODE'; value: string } | n
 
 /** figma.com 링크의 파일 키 (`/proto/<key>/…`). Figma 링크가 아니면 null */
 export function fileKeyFromLink(url: string): string | null {
-  let parsed: URL
-  try {
-    parsed = new URL(url)
-  } catch {
-    return null
-  }
-  if (!FIGMA_HOST.test(parsed.hostname) || !FIGMA_PATH.test(parsed.pathname)) return null
-  return parsed.pathname.split('/')[2] || null
+  const parts = figmaParts(url)
+  return parts === null ? null : parts.path.split('/')[2] || null
 }

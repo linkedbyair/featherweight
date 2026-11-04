@@ -291,3 +291,52 @@ describe('addAreaLinks', () => {
     expect(rect).toBe('[ 10 70 60 80 ]')
   })
 })
+
+describe('플러그인 메인 스레드 — URL 전역이 없다', () => {
+  it('URL 없이도 node-id 와 파일 키를 읽는다', () => {
+    const saved = globalThis.URL
+    Object.assign(globalThis, { URL: undefined })
+    try {
+      const url =
+        'https://www.figma.com/proto/TC2ossMZRDbIvjAEgujAtg/Production?page-id=7%3A2&node-id=49-2948&viewport=8352%2C1092%2C0.1'
+      expect(nodeIdFromLink(url)).toBe('49:2948')
+      expect(fileKeyFromLink(url)).toBe('TC2ossMZRDbIvjAEgujAtg')
+      expect(nodeIdFromLink('https://figma.com.evil.io/proto/x/y?node-id=1-2')).toBeNull()
+    } finally {
+      Object.assign(globalThis, { URL: saved })
+    }
+  })
+})
+
+describe('spansForRun — 모양별로 뒤에 모인 run', () => {
+  it('"See ", " for…" 다음에 오는 밑줄 친 "Appendix A" 도 제자리를 찾는다', () => {
+    const characters = 'See Appendix A for attachment requirements.'
+    const segments = [
+      segment(0, 4),
+      segment(4, 14, {
+        decoration: 'UNDERLINE',
+        link: { type: 'URL', value: 'https://www.figma.com/proto/K/F?node-id=1-2' }
+      }),
+      segment(14, characters.length)
+    ]
+    const taken: Array<{ start: number; end: number }> = []
+    let cursor = 0
+    for (const run of ['See ', ' for attachment requirements.']) {
+      const result = spansForRun(characters, cursor, run, segments, taken)
+      expect(result.decorations).toEqual([])
+      cursor = result.next
+    }
+    const last = spansForRun(characters, cursor, 'Appendix A', segments, taken)
+    expect(last.decorations).toEqual([{ start: 0, end: 10, kind: 'UNDERLINE' }])
+    expect(last.links).toHaveLength(1)
+    expect(last.next).toBe(cursor) // 커서는 뒤로 안 간다
+  })
+
+  it('같은 낱말이 두 번이면 이미 맞춘 자리를 건너뛴다', () => {
+    const characters = 'A and A'
+    const segments = [segment(0, 7)]
+    const taken = [{ start: 0, end: 1 }]
+    spansForRun(characters, 7, 'A', segments, taken)
+    expect(taken[1]).toEqual({ start: 6, end: 7 })
+  })
+})
