@@ -4,7 +4,7 @@
 // fill 을 비우면 그 글리프가 빠지고, UI 가 같은 자리에 진짜 폰트로 다시 그린다.
 
 import { transformScale } from '../lib/imageTarget'
-import { FontRef, Reason, TextRunSource, TextSegment } from '../lib/types'
+import { FontRef, LeftoverPicture, Reason, TextRunSource, TextSegment } from '../lib/types'
 import { withTimeout } from '../lib/withTimeout'
 import { markTemporary } from './temporary'
 
@@ -562,17 +562,30 @@ export function hideTextGlyphs(node: TextNode): void {
 const PICTOGRAPH =
   /[\u2600-\u27BF\u2B00-\u2BFF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|\uD83E[\uDC00-\uDFFF]/
 
+/** 도형으로 바꾼 결과 — 그림으로 바꾼 글자는 UI 가 PDF 에 직접 얹을 그림을 돌려준다 */
+export type Leftover = { ok: false } | { ok: true; picture?: LeftoverPicture }
+
 /**
  * 글자를 같은 모양의 도형으로 바꾼다 (Settings.flattenLeftovers). 보통은 벡터로 — 채움·획·효과·
- * 블렌드는 벡터가 이어받는다. 이모지가 섞였으면 Figma 가 그린 그대로의 4배 그림으로 바꾼다.
- * 오토레이아웃 형제가 움직이지 않게 부모를 먼저 굳힌다. 실패하면 false — Type 3 그대로 남는다.
+ * 블렌드는 벡터가 이어받는다. 이모지가 섞였으면 Figma 가 그린 그대로의 4배 그림을 찍어 UI 가
+ * 머지할 때 같은 자리에 얹는다(frame 이 있을 때만 — 그림이 놓일 좌표의 기준). 위에 덮인 글자는
+ * 그림이 맨 위에 얹히면 안 되므로 그림으로 바꾸지 않는다(canOverlay).
+ * 오토레이아웃 형제가 움직이지 않게 부모를 먼저 굳힌다. 실패하면 ok: false — Type 3 그대로 남는다.
  */
-export async function flattenText(node: TextNode): Promise<boolean> {
+export async function flattenText(
+  node: TextNode,
+  frame?: SceneNode,
+  canOverlay = true
+): Promise<Leftover> {
   try {
     const parent = node.parent
     // 글자 자체가 마스크면 도형이 마스크를 이어받는지 장담할 수 없다 — 가려지던 것이 드러나면 안 된다
-    if (parent === null || node.isMask) return false
-    if (PICTOGRAPH.test(node.characters)) return await rasterizeText(node)
+    if (parent === null || node.isMask) return { ok: false }
+    if (PICTOGRAPH.test(node.characters)) {
+      if (frame === undefined || !canOverlay) return { ok: false }
+      const picture = await pictureOf(node, frame)
+      return picture === null ? { ok: false } : { ok: true, picture }
+    }
     freezeLayout(parent)
     const vector = figma.flatten(
       [node],
@@ -580,9 +593,9 @@ export async function flattenText(node: TextNode): Promise<boolean> {
       parent.children.indexOf(node)
     )
     await clearUnexportablePaints(vector)
-    return true
+    return { ok: true }
   } catch {
-    return false
+    return { ok: false }
   }
 }
 
@@ -612,30 +625,22 @@ async function clearUnexportablePaints(vector: VectorNode): Promise<void> {
 }
 
 /**
- * Figma 가 그린 그대로를 4배 PNG 로 찍어 같은 자리에 놓고 글자는 숨긴다. 축에 맞는 글자만 —
- * 돌아간 글자는 그림의 자리를 맞추기 어렵다.
+ * Figma 가 그린 그대로를 4배 PNG 로 찍고 글자는 숨긴다. 그림은 Figma 에 넣지 않는다 — 플러그인이
+ * 만든 그림 칠은 내보내기 때 아직 안 읽혀 분홍 자리표시로 찍히는 일이 있었다(실측: WCMA 주차 표지
+ * 넷 중 넷). 대신 UI 가 머지할 때 pdf-lib 으로 같은 자리에 직접 얹는다. 축에 맞는 글자만.
  */
-async function rasterizeText(node: TextNode): Promise<boolean> {
+async function pictureOf(node: TextNode, frame: SceneNode): Promise<LeftoverPicture | null> {
   const bounds = node.absoluteRenderBounds
-  const parent = node.parent
-  if (bounds === null || parent === null || !isAxisAligned(node.absoluteTransform)) return false
-  const bytes = await node.exportAsync({ format: 'PNG', constraint: { type: 'SCALE', value: 4 } })
-  freezeLayout(parent)
-  const image = figma.createImage(bytes)
-  // 만든 직후에는 그림이 아직 안 읽혔을 수 있다 — 그대로 내보내면 Figma 의 분홍 자리표시가 찍힌다
-  // (실측: WCMA 주차 표지 둘 중 하나가 분홍 상자로 나왔다). 크기를 읽으면 다 읽힌 뒤에 돌아온다
-  await image.getSizeAsync()
-  const picture = figma.createRectangle()
-  picture.name = node.name
-  picture.resize(Math.max(bounds.width, 0.01), Math.max(bounds.height, 0.01))
-  picture.fills = [{ type: 'IMAGE', imageHash: image.hash, scaleMode: 'FILL' }]
-  ;(parent as BaseNode & ChildrenMixin).insertChild(parent.children.indexOf(node) + 1, picture)
-  // 부모가 그룹이면 x·y 의 기준이 부모가 아니다 — 놓은 뒤 절대 위치의 차이만큼 옮긴다
-  const placed = picture.absoluteBoundingBox
-  if (placed !== null) {
-    picture.x += bounds.x - placed.x
-    picture.y += bounds.y - placed.y
-  }
+  const frameBox = frame.absoluteBoundingBox
+  if (bounds === null || frameBox === null || !isAxisAligned(node.absoluteTransform)) return null
+  const png = await node.exportAsync({ format: 'PNG', constraint: { type: 'SCALE', value: 4 } })
+  freezeLayout(node.parent)
   node.visible = false
-  return true
+  return {
+    x: bounds.x - frameBox.x,
+    y: bounds.y - frameBox.y,
+    width: bounds.width,
+    height: bounds.height,
+    png
+  }
 }

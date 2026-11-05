@@ -2,11 +2,12 @@
 
 import { t } from '../lib/i18n'
 import { NODE_LINK_SCHEME } from '../lib/figmaLinks'
-import { LinkArea, Reason } from '../lib/types'
+import { LeftoverPicture, LinkArea, Reason } from '../lib/types'
 import {
   PDFArray,
   PDFDict,
   PDFDocument,
+  PDFImage,
   PDFName,
   PDFNumber,
   PDFPage,
@@ -97,6 +98,51 @@ export type OutlineCost = {
 }
 
 export const PRODUCER = 'Featherweight'
+
+/**
+ * 그림으로 바꾼 글자(이모지가 섞인 라벨)를 제자리에 얹는다. 좌표는 프레임 기준(아래로 +y).
+ * 같은 그림은 한 번만 넣는다 — 같은 라벨이 여러 쪽에 되풀이된다.
+ */
+export async function drawPictures(
+  document: PDFDocument,
+  page: PDFPage,
+  pictures: readonly LeftoverPicture[],
+  embedded: Map<string, PDFImage> = pictureCache(document)
+): Promise<void> {
+  const height = page.getHeight()
+  for (const picture of pictures) {
+    const key = fingerprint(picture.png)
+    let image = embedded.get(key)
+    if (image === undefined) {
+      image = await document.embedPng(picture.png)
+      embedded.set(key, image)
+    }
+    page.drawImage(image, {
+      x: picture.x,
+      y: height - picture.y - picture.height,
+      width: picture.width,
+      height: picture.height
+    })
+  }
+}
+
+const caches = new WeakMap<PDFDocument, Map<string, PDFImage>>()
+
+function pictureCache(document: PDFDocument): Map<string, PDFImage> {
+  let cache = caches.get(document)
+  if (cache === undefined) {
+    cache = new Map()
+    caches.set(document, cache)
+  }
+  return cache
+}
+
+/** 같은 PNG 인지 — 길이와 전체 바이트의 해시(같은 라벨을 같은 배율로 찍은 것은 바이트가 같다) */
+function fingerprint(bytes: Uint8Array): string {
+  let hash = 0
+  for (let i = 0; i < bytes.length; i += 1) hash = (hash * 31 + bytes[i]) | 0
+  return `${bytes.length}:${hash}`
+}
 
 /**
  * 리액션 링크 자리를 링크 주석으로. URL 은 NODE 자리표시라 relinkToPages 가 쪽 이동으로 바꾸거나

@@ -434,8 +434,22 @@ export type PdfPart = {
    * 바꾸는 데 쓴다 (ui/pdfLinks). 대상이 내보내기 밖이면 키가 없다.
    */
   linkTargets?: Record<string, number>
+  /** 그림으로 바꾼 글자들 — UI 가 이 쪽에 직접 얹는다 (main/text flattenText) */
+  pictures?: LeftoverPicture[]
   /** 프로토타입 리액션이 걸린 레이어의 자리 — exportAsync PDF 에는 리액션 링크가 없다 (main/links) */
   linkAreas?: LinkArea[]
+}
+
+/**
+ * 그림으로 바꾼 글자(이모지가 섞인 라벨). Figma 가 그린 그대로의 PNG 와 프레임 기준 자리(아래로 +y).
+ * UI 가 머지할 때 그 쪽에 직접 얹는다 — Settings.flattenLeftovers
+ */
+export type LeftoverPicture = {
+  x: number
+  y: number
+  width: number
+  height: number
+  png: Uint8Array
 }
 
 /** 쪽 이동 링크를 달 자리. 프레임 왼쪽 위 기준, y 아래로. target 은 정규화한 노드 id */

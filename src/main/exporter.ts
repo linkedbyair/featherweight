@@ -1,6 +1,14 @@
 // 프레임 1개 → PDF 1부. 원본은 절대 건드리지 않는다. (PRD §7.4, §12)
 
-import { PdfPart, Reason, Settings, TextRunSource, TMP_MARK_KEY, TMP_NODE_NAME } from '../lib/types'
+import {
+  LeftoverPicture,
+  PdfPart,
+  Reason,
+  Settings,
+  TextRunSource,
+  TMP_MARK_KEY,
+  TMP_NODE_NAME
+} from '../lib/types'
 import { withTimeout } from '../lib/withTimeout'
 import { ImageManySender, ImageRequestSender, OriginalSink, shrinkImages } from './images'
 import { collectLinks } from './links'
@@ -12,6 +20,7 @@ import {
   extractText,
   hideTextGlyphs,
   flattenText,
+  isCovered,
   screenTextNode,
   TextCandidate
 } from './text'
@@ -107,7 +116,8 @@ export async function exportFrame(
         )
       : {
           sources: [] as TextRunSource[],
-          fallbacks: [] as Array<{ nodeId: string; reason: Reason }>
+          fallbacks: [] as Array<{ nodeId: string; reason: Reason }>,
+          pictures: [] as LeftoverPicture[]
         }
     if (context.isCancelled()) return cancelledFrame(id, node.name)
 
@@ -129,6 +139,7 @@ export async function exportFrame(
         name: node.name,
         bytes,
         text: text.sources,
+        ...(text.pictures.length > 0 ? { pictures: text.pictures } : {}),
         ...(Object.keys(linkTargets).length > 0 ? { linkTargets } : {}),
         ...(linkAreas.length > 0 ? { linkAreas } : {}),
         stats: {
@@ -196,7 +207,11 @@ async function prepareText(
   original: ExportableNode,
   context: FrameContext,
   planKey?: string
-): Promise<{ sources: TextRunSource[]; fallbacks: Array<{ nodeId: string; reason: Reason }> }> {
+): Promise<{
+  sources: TextRunSource[]
+  fallbacks: Array<{ nodeId: string; reason: Reason }>
+  pictures: LeftoverPicture[]
+}> {
   // 리포트의 nodeId 는 원본 것이어야 한다 — 클론은 내보내고 나면 지워져서
   // "이 사유를 클릭해 해당 텍스트 보기" 가 갈 곳이 없어진다.
   // clone() 은 자식 순서를 보존하므로 순회 순서로 짝을 맞춘다.
@@ -209,15 +224,26 @@ async function prepareText(
     const known = textPlans.get(planKey, originalIds, cloneTexts.length)
     if (known !== undefined) {
       for (const index of known.hidden) hideTextGlyphs(cloneTexts[index])
-      for (const index of known.flattened ?? []) await flattenText(cloneTexts[index])
-      return { sources: [...known.sources], fallbacks: [...known.fallbacks] }
+      for (const index of known.flattened ?? [])
+        await flattenText(cloneTexts[index], clone, !known.coveredFlattened?.includes(index))
+      return {
+        sources: [...known.sources],
+        fallbacks: [...known.fallbacks],
+        pictures: [...(known.pictures ?? [])]
+      }
     }
   }
 
   const fallbacks: Array<{ nodeId: string; reason: Reason }> = []
   const candidates: Array<{ index: number; candidate: TextCandidate }> = []
   /** 다시 그리지 못한 노드 — flattenLeftovers 면 벡터로 바꾸고 보이지 않는 글자를 얹는다 */
-  const leftovers: Array<{ index: number; reportId: string; source?: TextRunSource }> = []
+  const leftovers: Array<{
+    index: number
+    reportId: string
+    source?: TextRunSource
+    /** 위에 덮인 글자 — 그림으로 맨 위에 얹으면 안 된다 */
+    covered: boolean
+  }> = []
 
   for (let index = 0; index < cloneTexts.length; index += 1) {
     const node = cloneTexts[index]
@@ -226,7 +252,8 @@ async function prepareText(
     const screened = screenTextNode(node, clone)
     if (!screened.ok) {
       fallbacks.push({ nodeId: reportId, reason: screened.reason })
-      if (flatten && FLATTENABLE(screened.reason)) leftovers.push({ index, reportId })
+      if (flatten && FLATTENABLE(screened.reason))
+        leftovers.push({ index, reportId, covered: screened.reason.code === 'reject.covered' })
       continue
     }
 
@@ -251,7 +278,12 @@ async function prepareText(
   for (const { index, candidate } of candidates) {
     if (!approved.has(candidate.source.nodeId)) {
       if (flatten)
-        leftovers.push({ index, reportId: candidate.source.nodeId, source: candidate.source })
+        leftovers.push({
+          index,
+          reportId: candidate.source.nodeId,
+          source: candidate.source,
+          covered: false
+        })
       continue
     }
     hideTextGlyphs(candidate.node)
@@ -263,6 +295,8 @@ async function prepareText(
   // 벡터로 바꾸면 모양(획·그림자·장식 포함)은 Figma 가 그린 그대로이고 폰트는 사라진다.
   // 검색·복사·링크를 잃지 않게, 같은 자리에 보이지 않는 진짜 글자를 얹는다(그릴 폰트가 있을 때)
   const flattened: number[] = []
+  const coveredFlattened: number[] = []
+  const pictures: LeftoverPicture[] = []
   for (const leftover of leftovers) {
     const node = cloneTexts[leftover.index]
     let source = leftover.source
@@ -270,8 +304,13 @@ async function prepareText(
       const extracted = await extractText(node, clone)
       if (!('failed' in extracted)) source = extracted.source
     }
-    if (!(await flattenText(node))) continue
+    // 사유와 상관없이 직접 본다 — 폰트가 없어 걸린 라벨도 위에 덮여 있을 수 있다
+    const covered = leftover.covered || isCovered(node, clone)
+    const result = await flattenText(node, clone, !covered)
+    if (!result.ok) continue
     flattened.push(leftover.index)
+    if (covered) coveredFlattened.push(leftover.index)
+    if (result.picture !== undefined) pictures.push(result.picture)
     if (source !== undefined) {
       // 폭 검사는 보이는 글자만의 일이다 — 보이지 않는 글자가 조금 어긋나도 검색에는 상관없다
       const overlay: TextRunSource = { ...source, nodeId: leftover.reportId, invisible: true }
@@ -286,10 +325,12 @@ async function prepareText(
       cloneCount: cloneTexts.length,
       hidden,
       flattened,
+      coveredFlattened,
+      pictures,
       sources,
       fallbacks
     })
-  return { sources, fallbacks }
+  return { sources, fallbacks, pictures }
 }
 
 /** 벡터로 바꿔도 모양이 그대로인 사유 — 숨김·빈 글자·눌린 변환은 바꿀 것이 없다 */

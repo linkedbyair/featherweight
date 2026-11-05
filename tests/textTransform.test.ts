@@ -265,7 +265,7 @@ describe('flattenText', () => {
 
   it('같은 부모의 같은 자리에서 벡터로 바꾼다', async () => {
     const { flatten, parent, node, vector } = setup()
-    expect(await flattenText(node)).toBe(true)
+    expect(await flattenText(node)).toEqual({ ok: true })
     expect(flatten).toHaveBeenCalledWith([node], parent, 1)
     expect(vector.setVectorNetworkAsync).not.toHaveBeenCalled()
   })
@@ -287,16 +287,34 @@ describe('flattenText', () => {
     )
   })
 
-  it('이모지(♿)가 섞인 글자는 flatten 하지 않는다 — 그림으로 바꾸는 길로 간다', async () => {
+  it('이모지(♿)가 섞인 글자는 flatten 하지 않고 Figma 가 그린 그림을 돌려준다', async () => {
     const { flatten, node } = setup({ characters: 'f03.09–10 ♿ EV Charging' })
-    // 그림으로 바꿀 자리(렌더 경계)가 없으면 아무것도 안 바꾸고 false
-    expect(await flattenText(node)).toBe(false)
+    const png = new Uint8Array([1, 2, 3])
+    Object.assign(node, {
+      visible: true,
+      absoluteRenderBounds: { x: 130, y: 260, width: 114, height: 28 },
+      absoluteTransform: [
+        [1, 0, 130],
+        [0, 1, 260]
+      ],
+      exportAsync: vi.fn(async () => png)
+    })
+    const frame = { absoluteBoundingBox: { x: 100, y: 200, width: 1920, height: 1248 } }
+    const result = await flattenText(node, frame as unknown as SceneNode)
     expect(flatten).not.toHaveBeenCalled()
+    expect(result).toEqual({ ok: true, picture: { x: 30, y: 60, width: 114, height: 28, png } })
+    expect(node.visible).toBe(false)
+  })
+
+  it('위에 덮인 이모지 라벨은 그림으로 맨 위에 얹지 않는다 — 원래대로 둔다', async () => {
+    const { node } = setup({ characters: '♿' })
+    const frame = { absoluteBoundingBox: { x: 0, y: 0, width: 10, height: 10 } }
+    expect(await flattenText(node, frame as unknown as SceneNode, false)).toEqual({ ok: false })
   })
 
   it('글자 자체가 마스크면 건드리지 않는다', async () => {
     const { flatten, node } = setup({ isMask: true })
-    expect(await flattenText(node)).toBe(false)
+    expect(await flattenText(node)).toEqual({ ok: false })
     expect(flatten).not.toHaveBeenCalled()
   })
 
@@ -309,7 +327,7 @@ describe('flattenText', () => {
         }
       }
     })
-    expect(await flattenText(node)).toBe(false)
+    expect(await flattenText(node)).toEqual({ ok: false })
   })
 })
 
@@ -372,5 +390,43 @@ describe('collectTextNodes — 불리언 연산 안의 글자', () => {
       ]
     } as unknown as SceneNode
     expect(collectTextNodes(root).map((node) => node.name)).toEqual(['label', 'caption'])
+  })
+})
+
+describe('drawPictures', () => {
+  it('그림으로 바꾼 라벨을 프레임 기준 자리에 얹고, 같은 그림은 한 번만 넣는다', async () => {
+    const { PDFDocument: Doc } = await import('pdf-lib')
+    const { drawPictures } = await import('../src/ui/pdf')
+    // 1×1 투명 PNG
+    const png = Uint8Array.from(
+      atob(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
+      ),
+      (c) => c.charCodeAt(0)
+    )
+    const doc = await Doc.create()
+    const first = doc.addPage([1920, 1248])
+    const second = doc.addPage([1920, 1248])
+    const drawn = vi.spyOn(first, 'drawImage')
+    const picture = { x: 30, y: 60, width: 114, height: 28, png }
+    await drawPictures(doc, first, [picture])
+    await drawPictures(doc, second, [picture])
+    expect(drawn).toHaveBeenCalledWith(expect.anything(), {
+      x: 30,
+      y: 1248 - 60 - 28,
+      width: 114,
+      height: 28
+    })
+    const saved = await Doc.load(await doc.save())
+    const images = saved.context
+      .enumerateIndirectObjects()
+      .filter(([, object]) => /\/Subtype \/Image/.test(object.toString().slice(0, 400)))
+    // 그림 하나(+ 투명도 마스크 하나) — 쪽이 둘이어도 다시 넣지 않는다
+    expect(images.length).toBeLessThanOrEqual(2)
+    expect(
+      images.filter(([, object]) =>
+        /\/ColorSpace \/DeviceRGB/.test(object.toString().slice(0, 400))
+      )
+    ).toHaveLength(1)
   })
 })

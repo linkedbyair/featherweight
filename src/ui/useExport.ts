@@ -30,6 +30,7 @@ import { forgetOriginals, ownImageSizes } from './imageCache'
 import { savedSource } from '../lib/fitToSize'
 import { downloadPdf, ImageWeight, MergeOutput, mergePdfs, OutlineCost } from './pdf'
 import { patchFitParts } from './pdfDirect'
+import { drawPictures } from './pdf'
 import { drawTextLayer, FontCache } from './textLayer'
 import { loadFontBytes } from './fontSource'
 
@@ -188,6 +189,8 @@ export function useExport(
         drawText: wantsText.current
           ? async (document, page, index) => {
               const part = collected.find((candidate) => candidate.index === index)
+              // 그림으로 바꾼 라벨이 먼저 — 그 위의 보이지 않는 글자가 검색을 맡는다
+              if (part?.pictures !== undefined) await drawPictures(document, page, part.pictures)
               if (part === undefined || part.text.length === 0)
                 return { drawn: 0, fallbacks: [], substitutions: [] }
               cache ??= new FontCache(document, fonts.current, (font) => loadFontBytes(font))

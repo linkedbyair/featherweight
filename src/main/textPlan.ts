@@ -1,4 +1,4 @@
-import { Reason, TextRunSource } from '../lib/types'
+import { LeftoverPicture, Reason, TextRunSource } from '../lib/types'
 
 export type TextPlan = {
   /** The original nodes must still appear in exactly this order before a plan can be reused. */
@@ -8,6 +8,10 @@ export type TextPlan = {
   hidden: readonly number[]
   /** Leftover text nodes turned into vectors (Settings.flattenLeftovers). */
   flattened?: readonly number[]
+  /** Pictures produced for flattened text (labels with emoji), drawn by the UI. */
+  pictures?: readonly LeftoverPicture[]
+  /** Flattened indices that were covered by a layer above (never turned into overlay pictures). */
+  coveredFlattened?: readonly number[]
   sources: readonly TextRunSource[]
   fallbacks: ReadonlyArray<{ nodeId: string; reason: Reason }>
 }
