@@ -622,6 +622,9 @@ async function rasterizeText(node: TextNode): Promise<boolean> {
   const bytes = await node.exportAsync({ format: 'PNG', constraint: { type: 'SCALE', value: 4 } })
   freezeLayout(parent)
   const image = figma.createImage(bytes)
+  // 만든 직후에는 그림이 아직 안 읽혔을 수 있다 — 그대로 내보내면 Figma 의 분홍 자리표시가 찍힌다
+  // (실측: WCMA 주차 표지 둘 중 하나가 분홍 상자로 나왔다). 크기를 읽으면 다 읽힌 뒤에 돌아온다
+  await image.getSizeAsync()
   const picture = figma.createRectangle()
   picture.name = node.name
   picture.resize(Math.max(bounds.width, 0.01), Math.max(bounds.height, 0.01))
