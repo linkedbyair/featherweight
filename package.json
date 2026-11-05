@@ -52,7 +52,7 @@
       "slides"
     ],
     "id": "1672509720278498323",
-    "name": "Featherweight",
+    "name": "Airweight",
     "main": "src/main.ts",
     "ui": "src/ui.tsx",
     "documentAccess": "dynamic-page",

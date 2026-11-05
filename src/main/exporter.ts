@@ -11,6 +11,7 @@ import {
 } from '../lib/types'
 import { withTimeout } from '../lib/withTimeout'
 import { ImageManySender, ImageRequestSender, OriginalSink, shrinkImages } from './images'
+import { frameSection, frameTitle } from './frameTitle'
 import { collectLinks } from './links'
 import { ExportableNode, isExportable } from './selection'
 import { isTemporary, markTemporary } from './temporary'
@@ -138,6 +139,12 @@ export async function exportFrame(
         index,
         name: node.name,
         bytes,
+        ...(context.settings.bookmarks
+          ? {
+              title: frameTitle(node),
+              ...(frameSection(node) === undefined ? {} : { section: frameSection(node) })
+            }
+          : {}),
         text: text.sources,
         ...(text.pictures.length > 0 ? { pictures: text.pictures } : {}),
         ...(Object.keys(linkTargets).length > 0 ? { linkTargets } : {}),

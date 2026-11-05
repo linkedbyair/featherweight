@@ -37,8 +37,8 @@ describe('sanitizeFileName', () => {
   })
 
   it('전부 걸러지면 기본값', () => {
-    expect(sanitizeFileName('///')).toBe('Featherweight')
-    expect(sanitizeFileName('   ')).toBe('Featherweight')
+    expect(sanitizeFileName('///')).toBe('Airweight')
+    expect(sanitizeFileName('   ')).toBe('Airweight')
   })
 
   it('너무 길면 자른다', () => {

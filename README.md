@@ -1,3 +1,5 @@
+> **Airweight** — this branch is Linked by Air's studio edition. See [AIRWEIGHT.md](AIRWEIGHT.md).
+
 # Featherweight – Compressed PDF Export with Real Fonts
 
 ![Featherweight — compressed PDF export with real fonts](docs/brand/cover-1920x960.png?v=6)

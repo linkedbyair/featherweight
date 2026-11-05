@@ -295,6 +295,46 @@ const MESSAGES = {
     en: 'Instead of Figma’s Type 3 fonts, which some PDF apps (such as Bluebeam) and printers handle badly. The text looks the same and stays searchable; the file gets a little larger.',
     ko: '일부 PDF 앱(Bluebeam 등)과 인쇄기가 잘못 다루는 Figma 의 Type 3 폰트 대신 도형으로 그립니다. 모양은 같고 검색도 되며, 파일이 조금 커집니다.'
   },
+  'result.sectionDocument': { en: 'Document', ko: '문서' },
+  'result.documentAside': { en: '{pages} pages', ko: '{pages}쪽' },
+  'result.pageSize': { en: 'Prints at {size}', ko: '{size} 크기로 인쇄' },
+  'result.bookmarks': { en: '{count} bookmarks', ko: '책갈피 {count}개' },
+  'result.linksRelinked': {
+    en: '{count} Figma links now jump to pages in this PDF',
+    ko: 'Figma 링크 {count}개를 이 PDF 안의 쪽 이동으로 바꿈'
+  },
+  'result.imagesShared': {
+    en: '{count} repeated images stored once',
+    ko: '되풀이된 이미지 {count}개를 한 번만 저장'
+  },
+  'result.figmaLinksLeft': {
+    en: '{count} links still go to figma.com',
+    ko: 'figma.com 으로 가는 링크 {count}개'
+  },
+  'result.figmaLinksLeftSays': {
+    en: 'Their target layer is not in this export, or was deleted. People without access to the Figma file can’t open them — point them at a frame in the set, or remove them.',
+    ko: '대상 레이어가 이번 내보내기에 없거나 지워졌습니다. Figma 파일 권한이 없는 사람은 열 수 없으니, 세트 안의 프레임을 가리키게 하거나 지우세요.'
+  },
+  'settings.sectionPages': { en: 'Pages', ko: '페이지' },
+  'settings.pageSize': { en: 'Print size', ko: '인쇄 크기' },
+  'settings.pageSize.frame': { en: 'Frame size (no change)', ko: '프레임 크기 그대로' },
+  'settings.pageSize.tabloid': { en: 'Tabloid · 11 × 17 in', ko: '타블로이드 · 11 × 17 in' },
+  'settings.pageSize.letter': { en: 'Letter · 8.5 × 11 in', ko: '레터 · 8.5 × 11 in' },
+  'settings.pageSize.a3': { en: 'A3', ko: 'A3' },
+  'settings.pageSize.a4': { en: 'A4', ko: 'A4' },
+  'settings.pageSize.archC': { en: 'ARCH C · 18 × 24 in', ko: 'ARCH C · 18 × 24 in' },
+  'settings.pageSize.archD': { en: 'ARCH D · 24 × 36 in', ko: 'ARCH D · 24 × 36 in' },
+  'settings.pageFit.fill': { en: 'Fill page', ko: '꽉 채우기' },
+  'settings.pageFit.fit': { en: 'Fit whole frame', ko: '프레임 전체 맞추기' },
+  'settings.pageSizeSays': {
+    en: 'Each page prints at this size, turned to match the frame. Fill trims any extra evenly off the edges; Fit adds blank margins. The drawing itself is never rescaled, so it stays sharp and opens correctly in Preview.',
+    ko: '각 페이지가 이 크기로 인쇄됩니다(방향은 프레임을 따름). 꽉 채우기는 남는 부분을 가장자리에서 고르게 잘라 내고, 맞추기는 빈 여백을 둡니다. 그림 자체는 다시 축척하지 않아 선명하고 미리보기에서도 제대로 열립니다.'
+  },
+  'settings.bookmarks': { en: 'Add bookmarks', ko: '책갈피 넣기' },
+  'settings.bookmarksSays': {
+    en: 'One per frame, grouped by Figma section. Frames named just a number use their first line of text.',
+    ko: '프레임마다 하나, Figma 섹션별로 묶습니다. 이름이 숫자뿐인 프레임은 첫 줄의 글자를 씁니다.'
+  },
   'settings.sectionImages': { en: 'Images', ko: '이미지' },
   /** 보이는 창만 잘라 넣기 — 기본 켬. 끄면 예전처럼 통째로 줄인다 (docs/IMAGE-CROP.md) */
   'settings.cropToVisible': {
@@ -302,7 +342,7 @@ const MESSAGES = {
     ko: '보이는 영역만 저장'
   },
   'settings.cropToVisibleSays': {
-    en: 'When only part of an image is visible, Featherweight stores just that area if every placement stays equally sharp and the PDF becomes smaller. When off, the full image is downscaled.',
+    en: 'When only part of an image is visible, Airweight stores just that area if every placement stays equally sharp and the PDF becomes smaller. When off, the full image is downscaled.',
     ko: '원본의 일부만 보이는 이미지는, 모든 사용 위치의 선명도를 유지하면서 PDF가 더 작아지는 경우에만 보이는 영역만 저장합니다. 끄면 전체 이미지를 축소합니다.'
   },
   'settings.outlineAllSays': {
@@ -1046,7 +1086,7 @@ const MESSAGES = {
   },
   'fontFile.bitmapOnly': {
     en: 'This font file permits bitmap embedding only, which is not supported. Select another font file.',
-    ko: '이 폰트 파일은 비트맵 방식의 포함만 허용하지만 Featherweight는 이를 지원하지 않습니다. 다른 폰트 파일을 선택하세요.'
+    ko: '이 폰트 파일은 비트맵 방식의 포함만 허용하지만 Airweight는 이를 지원하지 않습니다. 다른 폰트 파일을 선택하세요.'
   },
   'fonts.fileVariable': {
     en: 'Variable font files are not supported. Replace this file with a static font file for {slotStyle}.',

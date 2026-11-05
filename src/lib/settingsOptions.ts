@@ -3,6 +3,7 @@
 // 선택지를 바꾸면 clientStorage 에 남은 옛 값이 어느 칸에도 안 맞으므로 가장 가까운 값으로
 // 옮긴다. 그래야 업그레이드해도 사용자가 정해 둔 값이 사라지지 않는다.
 
+import { PAGE_SIZE_IDS } from './pageSize'
 import { DEFAULT_SETTINGS, Settings } from './types'
 
 /**
@@ -72,6 +73,9 @@ export function snapSettings(stored: Partial<Settings>): Settings {
     // minEdge(1600 까지 고를 수 있었다)는 건드리지 않아, 최소가 최대보다 큰 채로 남았다.
     // 화면은 새 교차를 막지만 들여올 때도 풀어 줘야 한다. 내리는 쪽으로 맞춘다 — 올리면
     // 사용자가 정한 적 없는 화질을 조용히 키운다
-    minEdge: minEdge > maxEdge ? atMost(MIN_EDGES, maxEdge) : minEdge
+    minEdge: minEdge > maxEdge ? atMost(MIN_EDGES, maxEdge) : minEdge,
+    // 옛 저장값이나 손상된 값은 기본값으로
+    pageSize: PAGE_SIZE_IDS.includes(merged.pageSize) ? merged.pageSize : DEFAULT_SETTINGS.pageSize,
+    pageFit: merged.pageFit === 'fit' ? 'fit' : 'fill'
   }
 }

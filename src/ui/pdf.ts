@@ -2,6 +2,7 @@
 
 import { t } from '../lib/i18n'
 import { NODE_LINK_SCHEME } from '../lib/figmaLinks'
+import { PageFit, PageSizeId } from '../lib/pageSize'
 import { LeftoverPicture, LinkArea, Reason } from '../lib/types'
 import {
   PDFArray,
@@ -17,6 +18,7 @@ import {
 } from 'pdf-lib'
 
 import { DrawResult, DrawSubstitution } from './textLayer'
+import { addBookmarks, applyPageSize, countFigmaLinks, dedupeImages } from './pdfFinish'
 import { relinkToPages } from './pdfLinks'
 
 export type MergePart = { index: number; bytes: Uint8Array }
@@ -35,6 +37,10 @@ export type MergeMeta = {
   linkTargets?: ReadonlyMap<string, number>
   /** 프레임 index → 리액션 링크 자리. 첫 쪽에 자리표시 링크로 달고, 아래 relink 가 쪽 이동으로 바꾼다 */
   linkAreas?: ReadonlyMap<number, readonly LinkArea[]>
+  /** Print size for every page (lib/pageSize). Omitted or 'frame' leaves pages at frame size */
+  pageSize?: { size: PageSizeId; fit: PageFit }
+  /** One bookmark per frame (frame index → title and section). Omitted: no outline */
+  bookmarks?: ReadonlyArray<{ index: number; title: string; section?: string }>
 }
 
 export type MergeOutput = PdfContents & {
@@ -45,6 +51,11 @@ export type MergeOutput = PdfContents & {
   textSubstitutions: DrawSubstitution[]
   /** figma.com 레이어 링크를 쪽 이동으로 바꾼 개수 (linkTargets 를 줬을 때) */
   linksRelinked: number
+  /** links still pointing at figma.com after relinking (targets outside this export) */
+  figmaLinksLeft: number
+  /** identical image copies stored once */
+  imagesShared: number
+  bookmarksAdded: number
 }
 
 /**
@@ -97,7 +108,7 @@ export type OutlineCost = {
   vectorBytes: number
 }
 
-export const PRODUCER = 'Featherweight'
+export const PRODUCER = 'Airweight'
 
 /**
  * 그림으로 바꾼 글자(이모지가 섞인 라벨)를 제자리에 얹는다. 좌표는 프레임 기준(아래로 +y).
@@ -205,6 +216,22 @@ export async function mergePdfs(
       ? relinkToPages(out, meta.linkTargets, firstPageOfFrame).relinked
       : 0
 
+  const figmaLinksLeft = countFigmaLinks(out)
+  const bookmarksAdded =
+    meta.bookmarks === undefined
+      ? 0
+      : addBookmarks(
+          out,
+          meta.bookmarks.flatMap((entry) => {
+            const page = firstPageOfFrame.get(entry.index)
+            return page === undefined
+              ? []
+              : [{ page, title: entry.title, ...(entry.section ? { section: entry.section } : {}) }]
+          })
+        )
+  if (meta.pageSize !== undefined) applyPageSize(out, meta.pageSize.size, meta.pageSize.fit)
+  const imagesShared = dedupeImages(out)
+
   out.setTitle(meta.title)
   out.setProducer(PRODUCER)
   out.setCreator(PRODUCER)
@@ -221,6 +248,9 @@ export async function mergePdfs(
     textFallbacks,
     textSubstitutions,
     linksRelinked,
+    figmaLinksLeft,
+    imagesShared,
+    bookmarksAdded,
     ...contents
   }
 }

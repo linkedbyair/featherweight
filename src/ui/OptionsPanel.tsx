@@ -8,10 +8,19 @@
 //
 // 톱니를 없앴으므로 설정 초기화가 여기로 왔다.
 
-import { Button, Checkbox, Muted, Text, VerticalSpace } from '@create-figma-plugin/ui'
+import {
+  Button,
+  Checkbox,
+  Dropdown,
+  Muted,
+  SegmentedControl,
+  Text,
+  VerticalSpace
+} from '@create-figma-plugin/ui'
 import { Fragment, JSX } from 'preact'
 
 import { t } from '../lib/i18n'
+import { PAGE_SIZE_IDS, PageFit, PageSizeId } from '../lib/pageSize'
 import { Settings } from '../lib/types'
 import { Says } from './panelParts'
 import { Section } from './Section'
@@ -66,6 +75,45 @@ export function OptionsPanel({
         <Says text={t('settings.flattenLeftoversSays')} />
       </Section>
 
+      <Section title={t('settings.sectionPages')}>
+        <Text>{t('settings.pageSize')}</Text>
+        <VerticalSpace space="extraSmall" />
+        <Dropdown
+          disabled={disabled}
+          onValueChange={(value: string) =>
+            onChange({ ...settings, pageSize: value as PageSizeId })
+          }
+          options={PAGE_SIZE_IDS.map((id) => ({ value: id, text: t(`settings.pageSize.${id}`) }))}
+          value={settings.pageSize}
+        />
+        {settings.pageSize === 'frame' ? null : (
+          <Fragment>
+            <VerticalSpace space="small" />
+            <SegmentedControl
+              disabled={disabled}
+              onValueChange={(value: string) =>
+                onChange({ ...settings, pageFit: value as PageFit })
+              }
+              options={[
+                { value: 'fill', children: t('settings.pageFit.fill') },
+                { value: 'fit', children: t('settings.pageFit.fit') }
+              ]}
+              value={settings.pageFit}
+            />
+          </Fragment>
+        )}
+        <Says text={t('settings.pageSizeSays')} />
+        <VerticalSpace space="small" />
+        <Checkbox
+          disabled={disabled}
+          onValueChange={(value: boolean) => onChange({ ...settings, bookmarks: value })}
+          value={settings.bookmarks}
+        >
+          <Text>{t('settings.bookmarks')}</Text>
+        </Checkbox>
+        <Says text={t('settings.bookmarksSays')} />
+      </Section>
+
       <Section title={t('settings.sectionImages')}>
         {/* 기본 켬. 규칙이 보수적이라 끌 이유가 드물지만 첫 배포의 도망갈 길로 둔다 (docs/IMAGE-CROP.md) */}
         <Checkbox
@@ -103,7 +151,7 @@ export function OptionsPanel({
         </Button>
         <div class="optionsVersion">
           <Text>
-            <Muted>Featherweight v{version}</Muted>
+            <Muted>Airweight v{version} · based on Featherweight</Muted>
           </Text>
         </div>
       </div>

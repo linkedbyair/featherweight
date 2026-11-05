@@ -14,7 +14,7 @@ const TRIM_EDGES = /^[.\s]+|[.\s]+$/g
  * 자르기는 글자(코드포인트) 단위로 — 이모지 한가운데를 자르면 깨진 반쪽이 남는다.
  * 자른 뒤 끝에 점·공백이 남을 수 있어 다시 다듬는다.
  */
-export function sanitizeFileName(name: string, fallback = 'Featherweight'): string {
+export function sanitizeFileName(name: string, fallback = 'Airweight'): string {
   const cleaned = [
     ...name
       .replace(CONTROL_CHARS, '')

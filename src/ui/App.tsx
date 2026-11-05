@@ -112,7 +112,8 @@ function AppBody(): JSX.Element {
     storedFonts,
     settings.embedText,
     settings.keepLinks,
-    settings.glyphFallback
+    settings.glyphFallback,
+    { pageSize: settings.pageSize, pageFit: settings.pageFit, bookmarks: settings.bookmarks }
   )
 
   /**

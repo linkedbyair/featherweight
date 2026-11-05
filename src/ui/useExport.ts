@@ -62,6 +62,14 @@ export type ExportReport = {
   images: ImageWeight
   /** 추출될 텍스트 — "제출 전 확인" 이 보여준다 (문서 순서) */
   extractable: string[]
+  /** finishing passes — page jumps, links left on figma.com, bookmarks, shared images, print size */
+  document?: {
+    linksRelinked: number
+    figmaLinksLeft: number
+    bookmarks: number
+    imagesShared: number
+    pageSize: Settings['pageSize']
+  }
 }
 
 export type ExportState = {
@@ -119,7 +127,12 @@ export function useExport(
   storedFonts: StoredFont[],
   embedText: boolean,
   keepLinks: boolean,
-  glyphFallback: boolean
+  glyphFallback: boolean,
+  finishing: Pick<Settings, 'pageSize' | 'pageFit' | 'bookmarks'> = {
+    pageSize: 'frame',
+    pageFit: 'fill',
+    bookmarks: false
+  }
 ): ExportState {
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState<Progress | null>(null)
@@ -146,6 +159,8 @@ export function useExport(
   wantsText.current = embedText
   wantsLinks.current = keepLinks
   wantsFallback.current = glyphFallback
+  const paper = useRef(finishing)
+  paper.current = finishing
 
   useEffect(() => {
     const offProgress = on<ProgressHandler>('progress', (progress) => {
@@ -185,6 +200,21 @@ export function useExport(
         ownImageSizes: ownImageSizes(),
         ...(wantsLinks.current
           ? { linkTargets: linkTargetsOf(collected), linkAreas: linkAreasOf(collected) }
+          : {}),
+        ...(paper.current.pageSize !== 'frame'
+          ? { pageSize: { size: paper.current.pageSize, fit: paper.current.pageFit } }
+          : {}),
+        ...(paper.current.bookmarks
+          ? {
+              bookmarks: collected
+                .filter((part) => part.title !== undefined)
+                .sort((a, b) => a.index - b.index)
+                .map((part) => ({
+                  index: part.index,
+                  title: part.title as string,
+                  ...(part.section === undefined ? {} : { section: part.section })
+                }))
+            }
           : {}),
         drawText: wantsText.current
           ? async (document, page, index) => {
@@ -445,7 +475,14 @@ export function useExport(
             bytes: merged.images.bytes,
             own: merged.images.own
           },
-          extractable: extractableText(collected)
+          extractable: extractableText(collected),
+          document: {
+            linksRelinked: merged.linksRelinked,
+            figmaLinksLeft: merged.figmaLinksLeft,
+            bookmarks: merged.bookmarksAdded,
+            imagesShared: merged.imagesShared,
+            pageSize: paper.current.pageSize
+          }
         })
         setError(null)
       } catch (mergeError) {

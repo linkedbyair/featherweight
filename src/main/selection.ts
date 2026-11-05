@@ -355,7 +355,7 @@ async function renderThumb(node: ExportableNode): Promise<Uint8Array | null> {
     } catch (error) {
       if (attempt === 1) {
         console.warn(
-          `[Featherweight] 썸네일 실패: ${node.name} (${node.type}, ${Math.round(node.width)}×${Math.round(node.height)})`,
+          `[Airweight] 썸네일 실패: ${node.name} (${node.type}, ${Math.round(node.width)}×${Math.round(node.height)})`,
           error
         )
       }

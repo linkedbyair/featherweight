@@ -347,6 +347,65 @@ export function ResultScreen({ report, firstPage, error, onOpenPreview }: Props)
         </Fold>
       )}
 
+      {report.document === undefined ? null : (
+        <Fold
+          title={t('result.sectionDocument')}
+          defaultOpen={report.document.figmaLinksLeft > 0}
+          summary={
+            report.document.figmaLinksLeft > 0 ? (
+              <span class="foldWarn">
+                {t('result.figmaLinksLeft', { count: report.document.figmaLinksLeft })}
+              </span>
+            ) : (
+              <Muted>{t('result.documentAside', { pages: report.pageCount })}</Muted>
+            )
+          }
+        >
+          {[
+            report.document.pageSize === 'frame'
+              ? null
+              : t('result.pageSize', { size: t(`settings.pageSize.${report.document.pageSize}`) }),
+            report.document.bookmarks === 0
+              ? null
+              : t('result.bookmarks', { count: report.document.bookmarks }),
+            report.document.linksRelinked === 0
+              ? null
+              : t('result.linksRelinked', { count: report.document.linksRelinked }),
+            report.document.imagesShared === 0
+              ? null
+              : t('result.imagesShared', { count: report.document.imagesShared })
+          ]
+            .filter((line): line is string => line !== null)
+            .map((line) => (
+              <div class="outcome" key={line}>
+                <div class="outcomeHead">
+                  <span class="outcomeIcon outcomeOk">
+                    <IconCheck16 />
+                  </span>
+                  <Text>{line}</Text>
+                </div>
+              </div>
+            ))}
+          {report.document.figmaLinksLeft === 0 ? null : (
+            <div class="outcome">
+              <div class="outcomeHead">
+                <span class="outcomeIcon outcomeWarn">
+                  <IconWarning16 />
+                </span>
+                <Text>{t('result.figmaLinksLeft', { count: report.document.figmaLinksLeft })}</Text>
+              </div>
+              <div class="outcomeChildren">
+                <div class="outcomeNote">
+                  <Text>
+                    <Muted>{t('result.figmaLinksLeftSays')}</Muted>
+                  </Text>
+                </div>
+              </div>
+            </div>
+          )}
+        </Fold>
+      )}
+
       {report.extractable.length === 0 ? null : (
         <Section
           title={t('result.sectionExtracted')}

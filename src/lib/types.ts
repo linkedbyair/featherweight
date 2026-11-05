@@ -1,5 +1,7 @@
 // main <-> ui 공유 타입. Figma·DOM 의존 금지. (PRD §7.3)
 
+import { PageFit, PageSizeId } from './pageSize'
+
 /**
  * `sheaf.*` 와 `__sheaf_tmp__` 는 옛 이름이지만 **바꾸면 안 된다.**
  * clientStorage 키라서 이름을 고치는 순간 기존 사용자의 저장된 설정과 폰트가 통째로
@@ -51,6 +53,12 @@ export type Settings = {
    * 보이지 않는 진짜 글자를 얹어 검색되게 한다. Type 3 를 잘못 다루는 앱(Bluebeam 등)·인쇄용
    */
   flattenLeftovers: boolean
+  /** Print size for every page — set with /UserUnit and page boxes, never by rescaling (lib/pageSize) */
+  pageSize: PageSizeId
+  /** fill: cover the paper, trimming overflow evenly · fit: whole frame, blank margins */
+  pageFit: PageFit
+  /** One bookmark per frame, grouped under the Figma section it sits in */
+  bookmarks: boolean
   /**
    * 보이는 창만 잘라 넣기 (docs/IMAGE-CROP.md). 끄면 예전처럼 이미지를 통째로 줄인다 —
    * 내보내기와 목표 용량 예측이 같이 꺼진다. 첫 배포의 도망갈 길.
@@ -74,7 +82,11 @@ export const DEFAULT_SETTINGS: Settings = {
   embedText: true,
   keepLinks: true,
   glyphFallback: true,
-  flattenLeftovers: false,
+  // Airweight (studio) defaults: built for print sets and Bluebeam
+  flattenLeftovers: true,
+  pageSize: 'frame',
+  pageFit: 'fill',
+  bookmarks: true,
   cropToVisible: true,
   fitToSize: false,
   fitTargetMb: 5
@@ -438,6 +450,10 @@ export type PdfPart = {
   pictures?: LeftoverPicture[]
   /** 프로토타입 리액션이 걸린 레이어의 자리 — exportAsync PDF 에는 리액션 링크가 없다 (main/links) */
   linkAreas?: LinkArea[]
+  /** Bookmark title — the frame name, or its first line of text when the name is just a number */
+  title?: string
+  /** Name of the Figma section the frame sits in, if any */
+  section?: string
 }
 
 /**
