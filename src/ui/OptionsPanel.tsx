@@ -114,6 +114,17 @@ export function OptionsPanel({
         <Says text={t('settings.bookmarksSays')} />
       </Section>
 
+      <Section title={t('settings.sectionCompat')}>
+        <Checkbox
+          disabled={disabled}
+          onValueChange={(value: boolean) => onChange({ ...settings, dropBackgroundBlur: value })}
+          value={settings.dropBackgroundBlur}
+        >
+          <Text>{t('settings.dropBackgroundBlur')}</Text>
+        </Checkbox>
+        <Says text={t('settings.dropBackgroundBlurSays')} />
+      </Section>
+
       <Section title={t('settings.sectionImages')}>
         {/* 기본 켬. 규칙이 보수적이라 끌 이유가 드물지만 첫 배포의 도망갈 길로 둔다 (docs/IMAGE-CROP.md) */}
         <Checkbox

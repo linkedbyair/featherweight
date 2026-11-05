@@ -11,6 +11,7 @@ import {
 } from '../lib/types'
 import { withTimeout } from '../lib/withTimeout'
 import { ImageManySender, ImageRequestSender, OriginalSink, shrinkImages } from './images'
+import { dropBackgroundBlur } from './effects'
 import { frameSection, frameTitle } from './frameTitle'
 import { collectLinks } from './links'
 import { ExportableNode, isExportable } from './selection'
@@ -93,6 +94,10 @@ export async function exportFrame(
     current = detachInstances(current) as ExportableNode
     clone = current
     markTemporary(current)
+
+    // Bluebeam draws Figma's background blur (frosted glass) as an opaque white box — drop the blur,
+    // keep the translucent fill. Only on the clone; the document is untouched.
+    if (context.settings.dropBackgroundBlur) dropBackgroundBlur(current)
 
     const images = await shrinkImages(
       current,

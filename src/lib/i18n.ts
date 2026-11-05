@@ -315,6 +315,15 @@ const MESSAGES = {
     en: 'Their target layer is not in this export, or was deleted. People without access to the Figma file can’t open them — point them at a frame in the set, or remove them.',
     ko: '대상 레이어가 이번 내보내기에 없거나 지워졌습니다. Figma 파일 권한이 없는 사람은 열 수 없으니, 세트 안의 프레임을 가리키게 하거나 지우세요.'
   },
+  'settings.sectionCompat': { en: 'Compatibility', ko: '호환성' },
+  'settings.dropBackgroundBlur': {
+    en: 'Remove background blur (for Bluebeam)',
+    ko: '배경 흐림 빼기 (Bluebeam 용)'
+  },
+  'settings.dropBackgroundBlurSays': {
+    en: 'Bluebeam draws Figma’s frosted-glass blur as a solid white box over the drawing. This keeps the translucent fill and drops only the blur. Your Figma file isn’t changed.',
+    ko: 'Bluebeam 은 Figma 의 배경 흐림(젖빛 유리)을 그림 위의 흰 상자로 그립니다. 반투명 채움은 두고 흐림만 뺍니다. Figma 파일은 바뀌지 않습니다.'
+  },
   'settings.sectionPages': { en: 'Pages', ko: '페이지' },
   'settings.pageSize': { en: 'Print size', ko: '인쇄 크기' },
   'settings.pageSize.frame': { en: 'Frame size (no change)', ko: '프레임 크기 그대로' },

@@ -59,6 +59,8 @@ export type Settings = {
   pageFit: PageFit
   /** One bookmark per frame, grouped under the Figma section it sits in */
   bookmarks: boolean
+  /** Drop background blur (frosted glass) — Bluebeam draws it as a white box. Fills are kept */
+  dropBackgroundBlur: boolean
   /**
    * 보이는 창만 잘라 넣기 (docs/IMAGE-CROP.md). 끄면 예전처럼 이미지를 통째로 줄인다 —
    * 내보내기와 목표 용량 예측이 같이 꺼진다. 첫 배포의 도망갈 길.
@@ -87,6 +89,7 @@ export const DEFAULT_SETTINGS: Settings = {
   pageSize: 'frame',
   pageFit: 'fill',
   bookmarks: true,
+  dropBackgroundBlur: true,
   cropToVisible: true,
   fitToSize: false,
   fitTargetMb: 5
